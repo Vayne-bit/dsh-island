@@ -102,12 +102,102 @@ dsh plugin --profile desktop add dsh-island-overlay
 
 然后重启 DSH，再把文件夹和 `%LOCALAPPDATA%\dsh-island-runtime` 删掉。
 
-## 排错
+## 常见问题
 
-- **没反应**：确认 `~/.dsh/dsh-island-state.json` 有内容在变（3 秒刷新一次）。没有 → 插件没加载，
-  看 DSH 启动日志，或重新跑一次 `install.ps1`。
-- **有 JSON 没胶囊**：浮层没起来。手动试：
-  `"C:\Users\<你>\AppData\Local\Programs\DeepSeek Harness\DeepSeek Harness.exe" <本目录>\overlay`
-  正常会弹出一条黑色胶囊，控制台有无关紧要的 disk_cache 报错。
-- **胶囊不置顶 / 盖住别人**：Windows 的置顶窗口在少数全屏独占程序（部分游戏）上会被盖住，这是系统限制。
-- **改了 `overlay/index.html` 要重启 DSH**：浮层是启动时拉起的，不热重载。
+### 安装
+
+**`dsh` 命令找不到 / `'dsh' 不是内部或外部命令`**
+DSH 不会把 `dsh` 加进 PATH，得用完整路径：
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd" plugin --profile desktop add dsh-island-overlay
+```
+
+装在非默认目录（比如 `D:\`）时，把上面路径换成你的实际位置。
+
+**`install.ps1` 报 `dsh.cmd not found`**
+脚本只在 `%LOCALAPPDATA%\Programs`、`Program Files`、`Program Files (x86)` 三个位置找 DSH。装在别处就手动指定：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File install.ps1 -Cli "D:\...\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd"
+```
+
+**`无法加载文件 install.ps1，因为在此系统上禁止运行脚本`**
+Windows 默认执行策略拦脚本。加 `-ExecutionPolicy Bypass`（上面的命令已经带了），不要改全局策略。
+
+**需要自己装 pnpm / node 吗**
+不需要。DSH 自带一份 pnpm（`resources\runtime\primary-runtime\dependencies\pnpm\bin\pnpm.mjs`），
+`dsh plugin` 内部用 DSH 自己的 Electron 跑它，跟系统的 node/pnpm 无关。系统里有别的 pnpm 也不会冲突。
+
+**pnpm 报 `ERR_PNPM_...` / 网络超时**
+`dsh plugin` 用的是你 npm 配置里的 registry。国内网络建议：
+
+```powershell
+npm config get registry   # 一般是 https://registry.npmmirror.com
+```
+
+本包在 npmmirror 已同步。若公司网络拦 npm，可临时指定源：
+`dsh plugin --profile desktop add dsh-island-overlay --registry=https://registry.npmmirror.com`。
+
+**装完没反应**
+装完必须**重启 DSH**（托盘右键退出，再打开）。热重载不会拉起浮层。
+确认 `~/.dsh/profiles/desktop/package.json` 的 `dsh.profile.bundles` 里有 `dsh-island-overlay`。
+
+**已经用 `link:` 装过本地目录，又想换成 npm 版**
+先卸再装，否则 pnpm 会把 link 改写成 npm 版本、你本地的改动就不再生效：
+
+```powershell
+& "<dsh.cmd 完整路径>" plugin --profile desktop remove dsh-island-overlay
+& "<dsh.cmd 完整路径>" plugin --profile desktop add dsh-island-overlay
+```
+
+反过来（npm 版换成本地开发）把 `add dsh-island-overlay` 换成 `add link:<本目录绝对路径>`。
+
+### 运行时
+
+**状态文件在变，但屏幕上看不到胶囊**
+先看日志，两个文件都在 `%USERPROFILE%\.dsh\`：
+
+- `dsh-island-plugin.log`：`runtime prepared` + `spawn ...` 说明浮层被拉起过；
+  只有 `skip: isElectron=false` 说明插件没跑在 DSH 主进程里。
+- `dsh-island-overlay.log`：每次启动写 `start v0.2.x`，之后每 60 秒一条 `alive`。
+  没有 `start` → 浮层根本没起来。
+
+手动起浮层验证：
+
+```powershell
+& "$env:LOCALAPPDATA\dsh-island-runtime\DeepSeek Harness.exe" "<本目录>\overlay"
+```
+
+正常会弹出一条黑色胶囊（控制台里的 `disk_cache` 报错可以忽略）。
+
+**浮层起不来，日志里连 `start` 都没有**
+多半是运行时镜像不完整。删掉 `%LOCALAPPDATA%\dsh-island-runtime` 再重启 DSH，插件会自动重建
+（同盘用硬链接，不额外占空间）。镜像里必须有 `resources\default_app.asar`，缺它 Electron 就不认命令行给的 app 目录。
+
+**跑一阵子自己消失了**
+已修（0.2.0+）。旧版在心跳短暂中断后不会恢复显示，看起来就是「消失了」。升级后：心跳断 30 秒先隐藏，
+恢复后自动重新显示，连续 5 分钟没恢复才退出进程。仍复现的话看 `dsh-island-overlay.log` 最后几行。
+
+**点胶囊后 DSH 变成窗口化 / 反应慢**
+已修（0.2.0+）。旧版用 `SW_RESTORE` 会把最大化窗口还原；现在只在窗口最小化时才还原。
+慢是因为旧版每次点击都新起一个 PowerShell，现在复用常驻的 `watch.ps1`（约 150–250ms）。
+
+**胶囊挡到浏览器标签页**
+鼠标事件是穿透的（只挡视觉，不挡点击）。想少挡：设置里把「迷你态」调小，或改用「顶部居中 → 右上角」，
+或开「仅 DSH 不在前台时显示」。拖动可以直接改位置（记在 `~/.dsh/dsh-island-pos.json`）。
+
+**换了显示器 / 拔了副屏后胶囊不见了**
+位置会被夹回最近的屏幕工作区，理论上不会跑到屏幕外。真丢了就删 `~/.dsh/dsh-island-pos.json` 重启 DSH。
+
+**改了 `overlay/index.html` 没生效**
+浮层是 DSH 启动时拉起的独立进程，不热重载。改完重启 DSH，或手动 `taskkill` 掉浮层进程（插件 3 秒内会重拉）。
+
+**全屏看视频 / 打游戏时胶囊还在**
+设置里开「全屏应用时自动隐藏」。注意它只认「窗口铺满整块屏幕」，最大化窗口不算全屏。
+少数独占全屏的游戏连置顶窗口都能盖住，这是 Windows 的限制，插件绕不过去。
+
+**多个 DSH 实例会不会叠出两个胶囊**
+不会，浮层有单实例锁，第二个实例直接退出。
+
+
