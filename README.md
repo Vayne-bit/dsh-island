@@ -27,7 +27,7 @@ DSH 的 Windows 顶部「灵动岛」：切换页面后仍然置顶显示当前�
    `%USERPROFILE%\.dsh\dsh-island-state.json`，每 3 秒心跳一次。
 2. **浮层** `overlay/`：一个透明的置顶 Electron 窗口，每 400ms 读那个 JSON 渲染胶囊。
    它**复用 DSH 安装目录里的 Electron**（`process.execPath`），所以不用另外下载 Electron；
-   宿主 30 秒没有心跳就先隐藏、5 分钟没心跳才自己退出。
+   宿主 30 秒没有心跳就先隐藏（不显示过期状态），心跳回来后自动重新显示，5 分钟都没恢复才退出。
 
    复用有个前提：安装目录里带着 `resources/app.asar`，Electron 会优先加载它、无视命令行给的
    app 目录。所以首次启动时会把运行时**硬链接**一份到

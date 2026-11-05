@@ -99,5 +99,6 @@ while ($true) {
 
   [Console]::Out.WriteLine("$fg $full")
   [Console]::Out.Flush()
-  Start-Sleep -Milliseconds 250
+  # 150ms：点击到窗口抢到前台最多等这一拍。原来是 700ms，实测点击要 1.5 秒才响应。
+  Start-Sleep -Milliseconds 150
 }

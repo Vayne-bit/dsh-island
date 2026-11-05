@@ -38,8 +38,6 @@ let dragOrigin = null
 let dragTimer = null
 let watchProc = null
 let hiddenByFs = false
-let hiddenByFg = false
-let hiddenByStale = false
 let dshForeground = false
 
 const cfgOf = (st) => (st && st.cfg) || DEFAULTS
@@ -186,15 +184,18 @@ function activate() {
   } catch (err) {}
 }
 
+// 窗口该不该露脸：状态过期（stale）、全屏应用在前台、或设置里选了「仅 DSH 不在前台」。
+// 用 win.isVisible() 判断当前状态而不是自己记标志位——以前自己记 hiddenByFg，
+// 结果 stale 隐藏后恢复时「以为已经显示」就再也没 showInactive 回来（浮层永久消失）。
 function decideVisibility() {
   try {
     if (!win || win.isDestroyed()) return
     const c = cfg || DEFAULTS
-    const wantHide = (c.hideFullscreen && hiddenByFs) || (c.showWhen === 'background' && dshForeground)
-    if (wantHide === hiddenByFg) return
-    hiddenByFg = wantHide
-    if (wantHide) win.hide()
-    else win.showInactive()
+    const wantHide = staleSince !== 0
+      || (c.hideFullscreen && hiddenByFs)
+      || (c.showWhen === 'background' && dshForeground)
+    if (wantHide) { if (win.isVisible()) win.hide() }
+    else { if (!win.isVisible()) win.showInactive() }
   } catch (err) {}
 }
 
@@ -213,13 +214,12 @@ function tick() {
   const age = Date.now() - Number(st.at)
   if (age <= DEAD_MS) {
     lastGood = Date.now()
-    staleSince = 0
+    // 心跳断过一阵又回来了：上面把它藏了，这里显回来。
+    // 以前这里只看自己记的标志位，藏了之后没人再 show —— 浮层就这样永久消失了。
+    if (staleSince) { staleSince = 0; log('stale: heartbeat back'); decideVisibility() }
   } else {
-    // 心跳断了几秒不算数：以前 15 秒没心跳就自杀，结果一次瞬时写文件失败/磁盘忙
-    // 就把浮层永久干掉了（用户看到的「跑一阵子就消失」）。现在只先藏起来，
-    // 5 分钟都没恢复才真退出。
-    if (!staleSince) { staleSince = Date.now(); log('stale: heartbeat lost, hiding') }
-    if (win && !win.isDestroyed() && win.isVisible()) win.hide()
+    // 心跳断几秒不算死：先藏起来别显示过期状态，5 分钟都没恢复才真退出。
+    if (!staleSince) { staleSince = Date.now(); log('stale: heartbeat lost, hiding'); decideVisibility() }
     if (Date.now() - staleSince > 300000) {
       log('quit: host heartbeat gone for 5min')
       app.quit()
@@ -229,6 +229,7 @@ function tick() {
 
   const c = cfgOf(st)
   applyCfg(c)
+  decideVisibility()
 
   const states = c.states || DEFAULTS.states
   const items = (Array.isArray(st.items) ? st.items : []).filter((it) => it && states[it.state] !== false)
