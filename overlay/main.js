@@ -7,7 +7,7 @@ const { execFile, spawn } = require('child_process')
 const DSH_HOME = process.env.DSH_HOME || path.join(os.homedir(), '.dsh')
 const STATE_FILE = path.join(DSH_HOME, 'dsh-island-state.json')
 const POS_FILE = path.join(DSH_HOME, 'dsh-island-pos.json')
-const DEAD_MS = 15000
+const DEAD_MS = 30000
 const LOG_FILE = path.join(DSH_HOME, 'dsh-island-overlay.log')
 
 function log(msg) {
@@ -17,12 +17,32 @@ process.on('uncaughtException', (e) => log('fatal: ' + ((e && e.stack) || e)))
 
 app.disableHardwareAcceleration() // 透明窗口在部分显卡驱动上会闪
 
+// 开两个 DSH 实例（或多 profile）会各拉起一个浮层，叠在屏幕同一个位置。
+// 只留第一个，后来的直接退出；状态文件是共享的，旧的那个照样能显示新状态。
+if (!app.requestSingleInstanceLock()) app.exit(0)
+
+const BASE_W = 480
+const BASE_H = 88
+const DEFAULTS = {
+  scale: 1, mini: 34, position: 'top-center', showWhen: 'always',
+  holdMs: { thinking: 2500, done: 3000, failed: 6000 },
+  effects: { whale: true, pulse: true, shake: true, reduce: false },
+  states: { thinking: true, approval: true, done: true, failed: true },
+  hideFullscreen: true,
+}
+
 let win = null
 let last = ''
+let cfg = null
 let dragOrigin = null
 let dragTimer = null
-let fsProc = null
+let watchProc = null
 let hiddenByFs = false
+let hiddenByFg = false
+let hiddenByStale = false
+let dshForeground = false
+
+const cfgOf = (st) => (st && st.cfg) || DEFAULTS
 
 function readPos() {
   try {
@@ -39,16 +59,40 @@ function savePos() {
   } catch (err) {}
 }
 
-function create() {
+// 窗口比胶囊大一圈：缩放后的胶囊要放得下，还要留出呼吸/涟漪的溢出空间
+function winSize(s) {
+  return { w: Math.round(BASE_W * s), h: Math.round(BASE_H * s) }
+}
+
+// 记下的位置可能落在已经拔掉/改分辨率的屏幕上，落在哪块屏就夹到那块屏里
+function place(c) {
+  const { w, h } = winSize(c.scale)
+  if (c.position === 'custom') {
+    const saved = readPos()
+    if (saved) {
+      const wa = screen.getDisplayNearestPoint({ x: saved.x, y: saved.y }).workArea
+      return {
+        x: Math.min(Math.max(saved.x, wa.x), wa.x + wa.width - w),
+        y: Math.min(Math.max(saved.y, wa.y), wa.y + wa.height - h),
+      }
+    }
+  }
   const wa = screen.getPrimaryDisplay().workArea
-  const W = 480
-  const H = 88
-  const saved = readPos()
+  const y = wa.y + 2
+  return c.position === 'top-right'
+    ? { x: wa.x + wa.width - w - 12, y }
+    : { x: Math.round(wa.x + (wa.width - w) / 2), y }
+}
+
+function create() {
+  const c = cfg || DEFAULTS
+  const { w, h } = winSize(c.scale)
+  const pos = place(c)
   win = new BrowserWindow({
-    width: W,
-    height: H,
-    x: saved ? saved.x : Math.round(wa.x + (wa.width - W) / 2),
-    y: saved ? saved.y : wa.y + 2,
+    width: w,
+    height: h,
+    x: pos.x,
+    y: pos.y,
     frame: false,
     transparent: true,
     resizable: false,
@@ -70,7 +114,16 @@ function create() {
   win.setAlwaysOnTop(true, 'screen-saver')
   win.setIgnoreMouseEvents(true, { forward: true })
   win.loadFile(path.join(__dirname, 'index.html'))
-  win.once('ready-to-show', () => win.show())
+  win.once('ready-to-show', () => win.showInactive())
+
+  // 诊断：之前浮层会莫名其妙消失且日志里什么都没留下，这里把每种死法都记下来
+  win.webContents.on('render-process-gone', (_e, d) => log('render-process-gone: ' + JSON.stringify(d)))
+  win.webContents.on('unresponsive', () => log('unresponsive'))
+  win.webContents.on('responsive', () => log('responsive'))
+  app.on('child-process-gone', (_e, d) => log('child-process-gone: ' + JSON.stringify(d)))
+  win.on('hide', () => log('window hidden'))
+  win.on('show', () => log('window shown'))
+  win.on('closed', () => log('window closed'))
 
   // 别的置顶窗口偶尔会把我们压下去，定期重新抬一次
   setInterval(() => {
@@ -80,7 +133,74 @@ function create() {
   }, 2000)
 }
 
+// 位置/尺寸/显示时机都来自配置，配置变了就地调整，不用重启浮层
+function applyCfg(next) {
+  const prev = cfg
+  cfg = next
+  if (!win || win.isDestroyed()) return
+  if (prev && next.position === prev.position && next.scale === prev.scale) return
+  const { w, h } = winSize(next.scale)
+  const pos = place(next)
+  try {
+    win.setSize(w, h)
+    win.setPosition(pos.x, pos.y)
+    if (next.position !== 'custom') savePos()
+  } catch (err) {}
+}
+
+// 前台窗口铺满整块屏幕（看视频/游戏）时整只隐藏；showWhen=background 时 DSH 在前台也隐藏。
+// 最大化不算全屏：它只盖工作区，还有任务栏露着。
+function watch() {
+  try {
+    watchProc = spawn('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(__dirname, 'watch.ps1')], { windowsHide: true })
+    let buf = ''
+    watchProc.stdout.on('data', (d) => {
+      buf += String(d)
+      const lines = buf.split(/\r?\n/)
+      buf = lines.pop() || ''
+      for (const line of lines) {
+        const [fg, full] = line.trim().split(' ').map((v) => v === '1')
+        if (fg === undefined || full === undefined) continue
+        dshForeground = fg
+        hiddenByFs = full
+        decideVisibility()
+      }
+    })
+    watchProc.on('error', (e) => { log('watch error: ' + ((e && e.message) || e)); watchProc = null })
+    watchProc.on('exit', (code) => {
+      log('watch exited code=' + code)
+      watchProc = null
+      // 脚本挂了就别一直隐藏着：当成非全屏，5 秒后重开
+      hiddenByFs = false
+      decideVisibility()
+      setTimeout(() => { if (!watchProc) watch() }, 5000)
+    })
+  } catch (err) { log('watch spawn failed: ' + ((err && err.message) || err)) }
+}
+
+// 点击胶囊 → 让常驻的 watch.ps1 去抢前台（走 stdin，省掉每次冷启动 PowerShell 的 1 秒）
+function activate() {
+  try {
+    if (watchProc && watchProc.stdin && !watchProc.stdin.destroyed) watchProc.stdin.write('activate\n')
+    else execFile('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(__dirname, 'activate.ps1')], () => {})
+  } catch (err) {}
+}
+
+function decideVisibility() {
+  try {
+    if (!win || win.isDestroyed()) return
+    const c = cfg || DEFAULTS
+    const wantHide = (c.hideFullscreen && hiddenByFs) || (c.showWhen === 'background' && dshForeground)
+    if (wantHide === hiddenByFg) return
+    hiddenByFg = wantHide
+    if (wantHide) win.hide()
+    else win.showInactive()
+  } catch (err) {}
+}
+
 let lastGood = Date.now()
+let staleSince = 0
+let aliveLogAt = 0
 function tick() {
   let raw = ''
   // 读失败（宿主正在原子替换文件）就跳过这一帧——以前这里直接当成「宿主已死」把窗口关了
@@ -90,44 +210,33 @@ function tick() {
   try { st = JSON.parse(raw) } catch (err) { return }
   if (!st || !st.at) return
 
-  if (Date.now() - Number(st.at) <= DEAD_MS) lastGood = Date.now()
-  else if (Date.now() - lastGood > DEAD_MS) { // 心跳断了 15 秒，宿主多半没了
-    log('quit: host heartbeat gone')
-    app.quit()
+  const age = Date.now() - Number(st.at)
+  if (age <= DEAD_MS) {
+    lastGood = Date.now()
+    staleSince = 0
+  } else {
+    // 心跳断了几秒不算数：以前 15 秒没心跳就自杀，结果一次瞬时写文件失败/磁盘忙
+    // 就把浮层永久干掉了（用户看到的「跑一阵子就消失」）。现在只先藏起来，
+    // 5 分钟都没恢复才真退出。
+    if (!staleSince) { staleSince = Date.now(); log('stale: heartbeat lost, hiding') }
+    if (win && !win.isDestroyed() && win.isVisible()) win.hide()
+    if (Date.now() - staleSince > 300000) {
+      log('quit: host heartbeat gone for 5min')
+      app.quit()
+    }
     return
   }
 
-  const body = JSON.stringify(st.items || [])
+  const c = cfgOf(st)
+  applyCfg(c)
+
+  const states = c.states || DEFAULTS.states
+  const items = (Array.isArray(st.items) ? st.items : []).filter((it) => it && states[it.state] !== false)
+  const body = JSON.stringify([items, c])
   if (body !== last) {
     last = body
-    try { win.webContents.send('state', JSON.parse(body)) } catch (err) {}
+    try { win.webContents.send('state', { items, cfg: c }) } catch (err) {}
   }
-}
-
-// 前台窗口铺满整块屏幕（看视频/游戏）时整只隐藏。
-// 最大化不算：它只盖工作区，还有任务栏露着。
-function watchFullscreen() {
-  try {
-    fsProc = spawn('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(__dirname, 'fullscreen.ps1')], { windowsHide: true })
-    let buf = ''
-    fsProc.stdout.on('data', (d) => {
-      buf += String(d)
-      const lines = buf.split(/\r?\n/)
-      buf = lines.pop() || ''
-      for (const line of lines) {
-        const full = line.trim() === '1'
-        if (full === hiddenByFs) continue
-        hiddenByFs = full
-        try {
-          if (!win || win.isDestroyed()) return
-          if (full) win.hide()
-          else win.showInactive()
-        } catch (err) {}
-      }
-    })
-    fsProc.on('error', () => { fsProc = null })
-    fsProc.on('exit', () => { fsProc = null })
-  } catch (err) {}
 }
 
 ipcMain.on('hover', (_e, on) => {
@@ -135,13 +244,9 @@ ipcMain.on('hover', (_e, on) => {
   try { win.setIgnoreMouseEvents(!on, { forward: true }) } catch (err) {}
 })
 
-ipcMain.on('activate', () => {
-  try {
-    execFile('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(__dirname, 'activate.ps1')], () => {})
-  } catch (err) {}
-})
+ipcMain.on('activate', () => activate())
 
-// 拖拽：窗口宽度只有 480，靠 mousemove 跟手会丢事件，
+// 拖拽：窗口宽度有限，靠 mousemove 跟手会丢事件，
 // 所以主进程每 16ms 读一次光标位置，窗口跟着光标走。
 ipcMain.on('drag-start', () => {
   try {
@@ -165,20 +270,26 @@ ipcMain.on('drag-start', () => {
 ipcMain.on('drag-end', () => {
   clearInterval(dragTimer)
   dragTimer = null
+  // 拖完立刻恢复鼠标穿透，否则松手瞬间窗口会继续拦点击
+  try { win.setIgnoreMouseEvents(true, { forward: true }) } catch (err) {}
   if (!dragOrigin) return
   dragOrigin = null
   savePos()
 })
 
 app.whenReady().then(() => {
-  log('start')
+  log('start v0.2.0')
   create()
   tick()
   setInterval(tick, 400)
-  watchFullscreen()
+  watch()
+  // 每 60 秒留一条活口，日志里能看出它到底活到什么时候
+  setInterval(() => log('alive'), 60000)
 })
 
-app.on('window-all-closed', () => app.quit())
+process.on('exit', (code) => log('exit code=' + code))
 app.on('before-quit', () => {
-  try { if (fsProc) fsProc.kill() } catch (err) {}
+  log('before-quit')
+  try { if (watchProc) watchProc.kill() } catch (err) {}
 })
+app.on('will-quit', () => log('will-quit'))

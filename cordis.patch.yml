@@ -1,4 +1,4 @@
-# dsh-island 以插入方式挂到根上下文
+# dsh-island-overlay 以插入方式挂到根上下文
 - insert:
-    - id: dsh-island
-      name: dsh-island
+    - id: dsh-island-overlay
+      name: dsh-island-overlay

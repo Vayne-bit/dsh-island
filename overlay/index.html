@@ -2,17 +2,19 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src 'self'">
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   html,body{height:100%;background:transparent;overflow:hidden;
     font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;
     -webkit-font-smoothing:antialiased;user-select:none;-webkit-app-region:no-drag}
 
-  .wrap{position:fixed;left:0;right:0;top:0;display:flex;justify-content:center;padding-top:10px}
+  /* 窗口尺寸 = 基准 * scale，内容整体等比缩放，胶囊永远正好铺满 */
+  .wrap{position:fixed;left:0;right:0;top:0;display:flex;justify-content:center;padding-top:10px;
+    transform:scale(var(--s,1));transform-origin:top center}
 
   .island{
-    --acc:#8a8f9c;position:relative;height:38px;padding:0 14px;max-width:460px;
+    --acc:#8a8f9c;--mini:34px;position:relative;height:38px;padding:0 14px;max-width:460px;
     display:flex;align-items:center;justify-content:center;border-radius:19px;
     background:rgba(11,12,16,.88);
     backdrop-filter:blur(26px) saturate(170%);-webkit-backdrop-filter:blur(26px) saturate(170%);
@@ -26,26 +28,48 @@
   .island.on{transform:translateY(0);opacity:1;pointer-events:auto;cursor:grab}
   .island.on:active{cursor:grabbing}
   .island.on:hover{border-color:rgba(255,255,255,.22)}
-  .island.mini{width:34px;height:34px;padding:0;justify-content:center;border-radius:17px}
-  .island.mini .txt,.island.mini .badge{display:none}
+  .island.mini{width:var(--mini);height:var(--mini);padding:0;justify-content:center;border-radius:calc(var(--mini)/2)}
+  .island.mini .seg:not(:first-child),.island.mini .label,.island.mini .meta,
+  .island.mini .title,.island.mini .badge{display:none}
 
-  .body{display:flex;align-items:center;gap:9px;width:100%;justify-content:center;animation:fadeIn .3s ease both}
+  /* 多任务：每个会话一段，横向并排，段间一条细竖线；超过 3 段收成 +N */
+  .body{display:flex;align-items:center;justify-content:center;gap:9px;width:100%;animation:fadeIn .3s ease both}
   @keyframes fadeIn{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
+  .segs{display:flex;align-items:center;min-width:0;flex:0 1 auto;overflow:hidden}
+  .seg{display:flex;align-items:center;gap:7px;min-width:0;padding:0 10px;flex:0 1 auto}
+  .seg:first-child{padding-left:0}
+  .seg:last-child{padding-right:0}
+  .seg+.seg{border-left:1px solid rgba(255,255,255,.12)}
+  .seg.thinking{--acc:#6ea8ff}
+  .seg.approval,.seg.ask{--acc:#ffb648}
+  .seg.done{--acc:#3ddc84}
+  .seg.failed{--acc:#ff5f57}
 
-  .txt{display:flex;align-items:center;gap:7px;min-width:0;flex:0 1 auto;overflow:hidden}
-  .label{font-weight:600;color:#fff;white-space:nowrap}
+  .label{font-weight:600;color:#fff;white-space:nowrap;flex:none}
   .meta{font-size:12px;color:rgba(255,255,255,.42);font-variant-numeric:tabular-nums;flex:none}
   .title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;
     color:rgba(255,255,255,.46);padding-left:7px;border-left:1px solid rgba(255,255,255,.12)}
   .badge{flex:none;font-size:11px;line-height:1;padding:3px 6px;border-radius:9px;
     background:rgba(255,255,255,.12);color:rgba(255,255,255,.75);font-variant-numeric:tabular-nums}
 
+  /* ── 思考：DSH 同款小鲸鱼（APNG 尾巴摆动），不支持动效时退回静态描边鲸鱼 ── */
   .island.thinking{--acc:#6ea8ff;border-color:rgba(110,168,255,.22);
-    box-shadow:0 0 0 1px rgba(110,168,255,.12),0 10px 34px rgba(30,80,190,.42),inset 0 1px 0 rgba(255,255,255,.07)}
+    box-shadow:0 0 0 1px rgba(110,168,255,.12),0 10px 34px rgba(30,80,190,.42),inset 0 1px 0 rgba(255,255,255,.07);
+    animation:breatheBlue 2.4s ease-in-out infinite}
+  @keyframes breatheBlue{
+    0%,100%{box-shadow:0 0 0 1px rgba(110,168,255,.10),0 10px 34px rgba(30,80,190,.36),inset 0 1px 0 rgba(255,255,255,.07)}
+    50%{box-shadow:0 0 0 1px rgba(110,168,255,.26),0 12px 42px rgba(40,100,220,.54),inset 0 1px 0 rgba(255,255,255,.09)}}
+
+  .whale{width:18px;height:18px;flex:none;image-rendering:auto;
+    filter:invert(1) brightness(1.35) drop-shadow(0 0 5px rgba(110,168,255,.55))}
+  .whale-still{width:14px;height:14px;flex:none;color:var(--acc);animation:whaleFloat 1.6s ease-in-out infinite}
+  @keyframes whaleFloat{0%,100%{transform:translateY(0) rotate(0)}50%{transform:translateY(-1.5px) rotate(-4deg)}}
+
   .spin{width:14px;height:14px;border-radius:50%;border:2px solid rgba(255,255,255,.14);
     border-top-color:var(--acc);animation:spin .85s linear infinite;flex:none}
   @keyframes spin{to{transform:rotate(360deg)}}
 
+  /* ── 审批 / 提问：琥珀脉冲 + 涟漪 ── */
   .island.approval,.island.ask{--acc:#ffb648;border-color:rgba(255,182,72,.3);background:rgba(26,19,8,.9);
     animation:pulseAmber 1.7s ease-in-out infinite}
   @keyframes pulseAmber{
@@ -57,13 +81,17 @@
   .ring::after{border:2px solid var(--acc);animation:ripple 1.7s ease-out infinite}
   @keyframes ripple{0%{transform:scale(1);opacity:.7}100%{transform:scale(2.4);opacity:0}}
 
+  /* ── 完成：绿勾描线 + 胶囊弹一下 + 一圈绿光炸开 ── */
   .island.done{--acc:#3ddc84;border-color:rgba(61,220,132,.3);background:rgba(8,24,16,.9);
     box-shadow:0 0 0 1px rgba(61,220,132,.12),0 10px 34px rgba(20,150,80,.36),inset 0 1px 0 rgba(255,255,255,.07)}
+  .island.done.on{animation:popIn .55s cubic-bezier(.32,1.35,.55,1)}
+  @keyframes popIn{0%{transform:translateY(0) scale(.9)}55%{transform:translateY(0) scale(1.045)}100%{transform:translateY(0) scale(1)}}
   .check{width:16px;height:16px;flex:none}
   .check path{fill:none;stroke:var(--acc);stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round;
     stroke-dasharray:22;stroke-dashoffset:22;animation:draw .45s .1s ease forwards}
   @keyframes draw{to{stroke-dashoffset:0}}
 
+  /* ── 失败：红叉 + 抖一下 + 红圈 ── */
   .island.failed{--acc:#ff5f57;border-color:rgba(255,95,87,.32);background:rgba(28,10,10,.9);
     box-shadow:0 0 0 1px rgba(255,95,87,.14),0 10px 36px rgba(190,30,30,.42),inset 0 1px 0 rgba(255,255,255,.06)}
   .island.failed.shake{animation:shake .45s .05s ease both}
@@ -71,43 +99,82 @@
     40%{transform:translateX(3px)}60%{transform:translateX(-2px)}80%{transform:translateX(1px)}}
   .cross{width:15px;height:15px;flex:none}
   .cross path{fill:none;stroke:var(--acc);stroke-width:2.4;stroke-linecap:round}
+
+  /* 结束态一次性炸圈（完成绿 / 失败红），只在状态切换那一帧播一次 */
+  .burst{position:absolute;inset:-2px;border-radius:inherit;border:2px solid var(--acc);
+    pointer-events:none;animation:burst .75s cubic-bezier(.2,.7,.4,1) forwards}
+  @keyframes burst{0%{transform:scale(1);opacity:.9}100%{transform:scale(1.28);opacity:0}}
+
+  /* 关掉动效：全部定格，只留颜色和图标 */
+  .island.reduce,.island.reduce .body,.island.reduce .check path,.island.reduce .whale-still,
+  .island.reduce .ring::after,.island.reduce .burst{animation:none!important}
+  .island.reduce .check path{stroke-dashoffset:0}
+  .island.no-pulse.approval,.island.no-pulse.ask{animation:none}
+  .island.no-shake{animation:none}
+  .island.no-whale .whale{display:none}
 </style>
 </head>
 <body>
-  <div class="wrap"><div class="island" id="island"><div class="body" id="body"></div></div></div>
+  <div class="wrap" id="wrap"><div class="island" id="island"><div class="body" id="body"></div></div></div>
 <script>
+const wrap = document.getElementById('wrap')
 const island = document.getElementById('island')
 const bodyEl = document.getElementById('body')
 const MAXW = 460
+const MAXSEG = 3
 const RANK = { approval: 4, ask: 3, failed: 2, done: 1, thinking: 0 }
-const ICON = {
-  thinking: '<span class="spin"></span>',
-  approval: '<span class="ring"></span>',
-  ask: '<span class="ring"></span>',
-  done: '<svg class="check" viewBox="0 0 20 20"><path d="M4.5 10.5l3.6 3.6L15.8 6.4"/></svg>',
-  failed: '<svg class="cross" viewBox="0 0 20 20"><path d="M6 6l8 8M14 6l-8 8"/></svg>'
-}
 const LABEL = { thinking: '正在思考', approval: '需要审批', ask: '等待回答', done: '完成', failed: '失败' }
 
+// DSH 自己「正在思考」用的就是这只鲸鱼尾巴：动效版是 60 帧 APNG，静态版是下面这条描边路径
+const WHALE_IMG = '<img class="whale" src="whale.png" alt="">'
+const WHALE_STILL = '<svg class="whale-still" viewBox="0 0 16 16" fill="none"><path d="M8.844 13.742C8.967 12.328 8.45 10.4 8.45 9.65C8.45 8.94 8.88 8.43 9.6 8.43C11.285 8.43 12.106 8.281 12.685 8.104C13.71 7.791 14.585 6.768 15.055 5.945C15.137 5.803 14.99 5.641 14.829 5.671C13.829 5.86 12.828 5.376 11.827 4.978C10.659 4.514 9.491 4.707 8.935 4.876C8.805 4.915 8.658 4.819 8.636 4.686C8.468 3.643 7.405 2.615 5.498 2.238C4.54 2.048 3.748 1.574 3.347 1.202C3.252 1.113 3.088 1.125 3.03 1.242C2.628 2.059 2.168 3.82 5.248 6.115C5.82 6.494 6.31 6.785 6.574 7.637C6.72 8.104 6.157 9.168 6.061 9.368C5.157 11.27 5.089 12.19 4.926 13.742" stroke="currentColor" stroke-width="1"/></svg>'
+
+const DEFAULTS = {
+  scale: 1, mini: 34, position: 'top-center', showWhen: 'always',
+  holdMs: { thinking: 2500, done: 3000, failed: 6000 },
+  effects: { whale: true, pulse: true, shake: true, reduce: false },
+  states: { thinking: true, approval: true, done: true, failed: true },
+}
+
 let items = []
+let cfg = DEFAULTS
 let curKey = ''
 let curState = ''
-let since = Date.now()
-let tick = null
 let hovered = false
 let shrinkTimer = null
-
-// 展开多久后缩成小图标：审批/提问常驻，其余够看清就行
-const HOLD_MS = { thinking: 2500, done: 3000, failed: 6000 }
+let tick = null
 
 function esc(s) {
   return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
 }
 
+function fmtTime(sec) {
+  sec = Math.max(0, Math.floor(sec))
+  return sec < 60 ? sec + 's' : Math.floor(sec / 60) + 'm' + (sec % 60) + 's'
+}
+
+function icon(state) {
+  const e = cfg.effects || DEFAULTS.effects
+  if (state === 'thinking') {
+    if (!e.whale) return '<span class="spin"></span>'
+    return e.reduce ? WHALE_STILL : WHALE_IMG
+  }
+  if (state === 'approval' || state === 'ask') return '<span class="ring"></span>'
+  if (state === 'done') return '<svg class="check" viewBox="0 0 20 20"><path d="M4.5 10.5l3.6 3.6L15.8 6.4"/></svg>'
+  return '<svg class="cross" viewBox="0 0 20 20"><path d="M6 6l8 8M14 6l-8 8"/></svg>'
+}
+
+function holdFor(state) {
+  const h = cfg.holdMs || DEFAULTS.holdMs
+  return h[state] || 0
+}
+
 function fit() {
-  if (island.classList.contains('mini')) { island.style.width = '34px'; return }
+  const mini = (cfg.mini || 34) + 'px'
+  island.style.setProperty('--mini', mini)
+  if (island.classList.contains('mini')) { island.style.width = mini; return }
   island.style.width = 'auto'
-  const w = Math.min(Math.ceil(island.getBoundingClientRect().width), MAXW)
+  const w = Math.min(Math.ceil(island.getBoundingClientRect().width / (cfg.scale || 1)), MAXW)
   island.style.width = w + 'px'
 }
 
@@ -127,28 +194,35 @@ function scheduleMini(ms) {
   }, ms)
 }
 
-function pick() {
-  let best = null
-  for (const it of items) {
-    if (!it || !it.state) continue
-    if (!best || (RANK[it.state] || 0) > (RANK[best.state] || 0)) best = it
-  }
-  return best
+// 多任务：按优先级排，审批/提问永远在最左边，同级按开始时间先后
+function ordered() {
+  return items
+    .filter(it => it && it.state)
+    .slice()
+    .sort((a, b) => (RANK[b.state] || 0) - (RANK[a.state] || 0) || (a.since || 0) - (b.since || 0))
 }
 
-function fmtTime(sec) {
-  sec = Math.max(0, Math.floor(sec))
-  return sec < 60 ? sec + 's' : Math.floor(sec / 60) + 'm' + (sec % 60) + 's'
+function segHtml(it, primary) {
+  const meta = it.state === 'thinking'
+    ? '<span class="meta" data-since="' + (Number(it.since) || Date.now()) + '">' + fmtTime((Date.now() - (Number(it.since) || Date.now())) / 1000) + '</span>'
+    : it.state === 'done' ? '<span class="meta">刚刚</span>' : ''
+  // 只有主段展开标题，其余段只留图标 + 状态词，避免胶囊被撑爆
+  const title = primary ? String((it.state === 'failed' && it.detail) ? it.detail : (it.title || '')) : ''
+  return '<div class="seg ' + it.state + '">' + icon(it.state) +
+    '<span class="label">' + (LABEL[it.state] || '') + '</span>' + meta +
+    (title ? '<span class="title">' + esc(title) + '</span>' : '') + '</div>'
 }
 
 function paintTimer() {
-  const el = island.querySelector('[data-el]')
-  if (el) el.textContent = fmtTime((Date.now() - since) / 1000)
+  for (const el of island.querySelectorAll('[data-since]')) {
+    el.textContent = fmtTime((Date.now() - Number(el.getAttribute('data-since'))) / 1000)
+  }
 }
 
 function render() {
-  const best = pick()
-  if (!best) {
+  wrap.style.setProperty('--s', String(cfg.scale || 1))
+  const list = ordered()
+  if (!list.length) {
     island.className = 'island'
     curKey = ''
     curState = ''
@@ -157,25 +231,33 @@ function render() {
     return
   }
 
-  const key = best.state + '|' + best.id + '|' + best.since
+  const best = list[0]
+  const e = cfg.effects || DEFAULTS.effects
+  const shown = list.slice(0, MAXSEG)
+  const rest = list.length - shown.length
+  // cfg 也进 key：设置页改了缩放/迷你尺寸/动效开关时，items 没变也得重画
+  const key = list.map(it => it.state + it.id + it.since).join(',') + '|' + rest + '|' + JSON.stringify(cfg)
   if (key !== curKey) {
     curKey = key
     curState = best.state
-    since = Number(best.since) || Date.now()
-    const extra = items.length - 1
-    const badge = extra > 0 ? '<span class="badge">×' + extra + '</span>' : ''
-    const meta = best.state === 'thinking' ? '<span class="meta" data-el>' + fmtTime((Date.now() - since) / 1000) + '</span>'
-      : best.state === 'done' ? '<span class="meta">刚刚</span>' : ''
-    const title = String((best.state === 'failed' && best.detail) ? best.detail : (best.title || ''))
-    island.className = 'island ' + best.state + (best.state === 'failed' ? ' shake' : '')
-    bodyEl.innerHTML = (ICON[best.state] || '') +
-      '<span class="txt"><span class="label">' + (LABEL[best.state] || '') + '</span>' + meta +
-      (title ? '<span class="title">' + esc(title) + '</span>' : '') + '</span>' + badge
+
+    let cls = 'island ' + best.state
+    if (best.state === 'failed' && e.shake && !e.reduce) cls += ' shake'
+    if (!e.pulse) cls += ' no-pulse'
+    if (e.reduce) cls += ' reduce'
+    island.className = cls
+
+    bodyEl.innerHTML = '<div class="segs">' +
+      shown.map((it, i) => segHtml(it, i === 0)).join('') + '</div>' +
+      (rest > 0 ? '<span class="badge">+' + rest + '</span>' : '') +
+      ((best.state === 'done' || best.state === 'failed') && !e.reduce ? '<span class="burst"></span>' : '')
     requestAnimationFrame(() => { fit(); island.classList.add('on') })
-    scheduleMini(hovered ? 0 : HOLD_MS[best.state])
+    scheduleMini(hovered ? 0 : holdFor(best.state))
   }
 
-  if (best.state === 'thinking') {
+  // 只要有思考中的段就跑秒表
+  const anyThinking = list.some(it => it.state === 'thinking')
+  if (anyThinking) {
     if (!tick) { paintTimer(); tick = setInterval(paintTimer, 1000) }
   } else if (tick) { clearInterval(tick); tick = null }
 }
@@ -189,7 +271,7 @@ island.addEventListener('mouseleave', () => {
   if (drag) return
   hovered = false
   window.islandApi.hover(false)
-  scheduleMini(HOLD_MS[curState] || 0)
+  scheduleMini(holdFor(curState))
 })
 
 // 拖动：窗口由主进程跟着光标走，这里只负责起停和区分「点一下」和「拖一下」
@@ -197,8 +279,10 @@ let drag = null
 function endDrag(click) {
   if (!drag) return
   drag = null
+  hovered = false // 拖太快时 mouseleave 会丢，这里兜底，否则窗口一直拦着鼠标
   window.islandApi.dragEnd()
   if (click) window.islandApi.activate()
+  scheduleMini(holdFor(curState))
 }
 island.addEventListener('mousedown', (e) => {
   if (e.button !== 0) return
@@ -213,7 +297,14 @@ window.addEventListener('mousemove', (e) => {
 })
 window.addEventListener('mouseup', () => endDrag(drag && !drag.moved))
 
-window.islandApi.onState((next) => { items = Array.isArray(next) ? next : []; render() })
+window.islandApi.onState((payload) => {
+  if (Array.isArray(payload)) { items = payload } // 兼容旧宿主只推数组
+  else if (payload && typeof payload === 'object') {
+    items = Array.isArray(payload.items) ? payload.items : []
+    if (payload.cfg) cfg = payload.cfg
+  }
+  render()
+})
 </script>
 </body>
 </html>

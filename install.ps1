@@ -34,4 +34,4 @@ if ($LASTEXITCODE -ne 0) { throw "dsh plugin add failed (exit $LASTEXITCODE)" }
 
 Write-Host ""
 Write-Host "Done. Restart DSH (quit from the tray, then start it again) to load the plugin."
-Write-Host "Uninstall: & `"$Cli`" plugin --profile $Profile remove dsh-island"
+Write-Host "Uninstall: & `"$Cli`" plugin --profile $Profile remove dsh-island-overlay"

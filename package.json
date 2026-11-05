@@ -1,13 +1,50 @@
 {
-  "name": "dsh-island",
-  "version": "0.1.1",
-  "private": true,
+  "name": "dsh-island-overlay",
+  "version": "0.2.0",
   "type": "module",
   "main": "lib/index.js",
-  "description": "灵动岛状态指示器：宿主跟踪会话的思考/审批/完成/失败状态，置顶浮层以顶部胶囊呈现",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "description": "Windows 灵动岛状态指示器：置顶胶囊显示会话的思考/审批/完成/失败状态，DSH 不在前台时也能看到",
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "deepseek",
+    "desktop",
+    "dynamic-island",
+    "notify",
+    "windows"
+  ],
+  "license": "MIT",
+  "author": "Vayne-bit",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Vayne-bit/dsh-island.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Vayne-bit/dsh-island/issues"
+  },
+  "homepage": "https://github.com/Vayne-bit/dsh-island#readme",
+  "os": [
+    "win32"
+  ],
+  "files": [
+    "lib",
+    "overlay",
+    "cordis.patch.yml",
+    "install.ps1",
+    "island-demo.html",
+    "README.md"
+  ],
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
     }
   }
 }
