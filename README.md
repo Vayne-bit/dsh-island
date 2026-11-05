@@ -58,6 +58,16 @@ powershell -ExecutionPolicy Bypass -File install.ps1 -Cli "D:\...\DeepSeek Harne
 
 > 装的是 `link:`，即 DSH 直接指向这个文件夹。**装完别删/别移动这个文件夹**，否则插件失效。
 
+## 从 npm 装
+
+已发布到 npm（[dsh-island-overlay](https://www.npmjs.com/package/dsh-island-overlay)），不用拷文件夹：
+
+```powershell
+dsh plugin --profile desktop add dsh-island-overlay
+```
+
+或者在 DSH 的「插件市场」里搜 `dsh-island-overlay` 安装。装完同样要**重启 DSH**。
+
 ## 设置
 
 装好后打开 DSH 的「插件」页 → 点开 `dsh-island-overlay` → 页面下方就是设置卡片，改完即时生效。
