@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;background:transparent;overflow:hidden;
+    font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;user-select:none;-webkit-app-region:no-drag}
+
+  .wrap{position:fixed;left:0;right:0;top:0;display:flex;justify-content:center;padding-top:10px}
+
+  .island{
+    --acc:#8a8f9c;position:relative;height:38px;padding:0 14px;max-width:460px;
+    display:flex;align-items:center;justify-content:center;border-radius:19px;
+    background:rgba(11,12,16,.88);
+    backdrop-filter:blur(26px) saturate(170%);-webkit-backdrop-filter:blur(26px) saturate(170%);
+    border:1px solid rgba(255,255,255,.10);
+    box-shadow:0 12px 34px rgba(0,0,0,.48),inset 0 1px 0 rgba(255,255,255,.06);
+    white-space:nowrap;overflow:hidden;font-size:13px;line-height:1;letter-spacing:.2px;
+    transform:translateY(-72px);opacity:0;pointer-events:none;
+    transition:width .55s cubic-bezier(.32,1.35,.55,1),height .4s cubic-bezier(.32,1.35,.55,1),background .35s ease,border-color .35s ease,
+      box-shadow .45s ease,transform .5s cubic-bezier(.32,1.35,.55,1),opacity .28s ease;
+  }
+  .island.on{transform:translateY(0);opacity:1;pointer-events:auto;cursor:grab}
+  .island.on:active{cursor:grabbing}
+  .island.on:hover{border-color:rgba(255,255,255,.22)}
+  .island.mini{width:34px;height:34px;padding:0;justify-content:center;border-radius:17px}
+  .island.mini .txt,.island.mini .badge{display:none}
+
+  .body{display:flex;align-items:center;gap:9px;width:100%;justify-content:center;animation:fadeIn .3s ease both}
+  @keyframes fadeIn{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
+
+  .txt{display:flex;align-items:center;gap:7px;min-width:0;flex:0 1 auto;overflow:hidden}
+  .label{font-weight:600;color:#fff;white-space:nowrap}
+  .meta{font-size:12px;color:rgba(255,255,255,.42);font-variant-numeric:tabular-nums;flex:none}
+  .title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;
+    color:rgba(255,255,255,.46);padding-left:7px;border-left:1px solid rgba(255,255,255,.12)}
+  .badge{flex:none;font-size:11px;line-height:1;padding:3px 6px;border-radius:9px;
+    background:rgba(255,255,255,.12);color:rgba(255,255,255,.75);font-variant-numeric:tabular-nums}
+
+  .island.thinking{--acc:#6ea8ff;border-color:rgba(110,168,255,.22);
+    box-shadow:0 0 0 1px rgba(110,168,255,.12),0 10px 34px rgba(30,80,190,.42),inset 0 1px 0 rgba(255,255,255,.07)}
+  .spin{width:14px;height:14px;border-radius:50%;border:2px solid rgba(255,255,255,.14);
+    border-top-color:var(--acc);animation:spin .85s linear infinite;flex:none}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  .island.approval,.island.ask{--acc:#ffb648;border-color:rgba(255,182,72,.3);background:rgba(26,19,8,.9);
+    animation:pulseAmber 1.7s ease-in-out infinite}
+  @keyframes pulseAmber{
+    0%,100%{box-shadow:0 0 0 1px rgba(255,182,72,.14),0 10px 32px rgba(255,150,20,.28),inset 0 1px 0 rgba(255,255,255,.07)}
+    50%{box-shadow:0 0 0 2px rgba(255,182,72,.30),0 12px 40px rgba(255,150,20,.50),inset 0 1px 0 rgba(255,255,255,.09)}}
+  .ring{position:relative;width:14px;height:14px;flex:none}
+  .ring::before,.ring::after{content:"";position:absolute;inset:0;border-radius:50%}
+  .ring::before{background:var(--acc);opacity:.9}
+  .ring::after{border:2px solid var(--acc);animation:ripple 1.7s ease-out infinite}
+  @keyframes ripple{0%{transform:scale(1);opacity:.7}100%{transform:scale(2.4);opacity:0}}
+
+  .island.done{--acc:#3ddc84;border-color:rgba(61,220,132,.3);background:rgba(8,24,16,.9);
+    box-shadow:0 0 0 1px rgba(61,220,132,.12),0 10px 34px rgba(20,150,80,.36),inset 0 1px 0 rgba(255,255,255,.07)}
+  .check{width:16px;height:16px;flex:none}
+  .check path{fill:none;stroke:var(--acc);stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round;
+    stroke-dasharray:22;stroke-dashoffset:22;animation:draw .45s .1s ease forwards}
+  @keyframes draw{to{stroke-dashoffset:0}}
+
+  .island.failed{--acc:#ff5f57;border-color:rgba(255,95,87,.32);background:rgba(28,10,10,.9);
+    box-shadow:0 0 0 1px rgba(255,95,87,.14),0 10px 36px rgba(190,30,30,.42),inset 0 1px 0 rgba(255,255,255,.06)}
+  .island.failed.shake{animation:shake .45s .05s ease both}
+  @keyframes shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-3px)}
+    40%{transform:translateX(3px)}60%{transform:translateX(-2px)}80%{transform:translateX(1px)}}
+  .cross{width:15px;height:15px;flex:none}
+  .cross path{fill:none;stroke:var(--acc);stroke-width:2.4;stroke-linecap:round}
+</style>
+</head>
+<body>
+  <div class="wrap"><div class="island" id="island"><div class="body" id="body"></div></div></div>
+<script>
+const island = document.getElementById('island')
+const bodyEl = document.getElementById('body')
+const MAXW = 460
+const RANK = { approval: 4, ask: 3, failed: 2, done: 1, thinking: 0 }
+const ICON = {
+  thinking: '<span class="spin"></span>',
+  approval: '<span class="ring"></span>',
+  ask: '<span class="ring"></span>',
+  done: '<svg class="check" viewBox="0 0 20 20"><path d="M4.5 10.5l3.6 3.6L15.8 6.4"/></svg>',
+  failed: '<svg class="cross" viewBox="0 0 20 20"><path d="M6 6l8 8M14 6l-8 8"/></svg>'
+}
+const LABEL = { thinking: '正在思考', approval: '需要审批', ask: '等待回答', done: '完成', failed: '失败' }
+
+let items = []
+let curKey = ''
+let curState = ''
+let since = Date.now()
+let tick = null
+let hovered = false
+let shrinkTimer = null
+
+// 展开多久后缩成小图标：审批/提问常驻，其余够看清就行
+const HOLD_MS = { thinking: 2500, done: 3000, failed: 6000 }
+
+function esc(s) {
+  return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+}
+
+function fit() {
+  if (island.classList.contains('mini')) { island.style.width = '34px'; return }
+  island.style.width = 'auto'
+  const w = Math.min(Math.ceil(island.getBoundingClientRect().width), MAXW)
+  island.style.width = w + 'px'
+}
+
+function expand() {
+  clearTimeout(shrinkTimer)
+  island.classList.remove('mini')
+  fit()
+}
+
+function scheduleMini(ms) {
+  clearTimeout(shrinkTimer)
+  if (!ms) return
+  shrinkTimer = setTimeout(() => {
+    if (hovered) return
+    island.classList.add('mini')
+    fit()
+  }, ms)
+}
+
+function pick() {
+  let best = null
+  for (const it of items) {
+    if (!it || !it.state) continue
+    if (!best || (RANK[it.state] || 0) > (RANK[best.state] || 0)) best = it
+  }
+  return best
+}
+
+function fmtTime(sec) {
+  sec = Math.max(0, Math.floor(sec))
+  return sec < 60 ? sec + 's' : Math.floor(sec / 60) + 'm' + (sec % 60) + 's'
+}
+
+function paintTimer() {
+  const el = island.querySelector('[data-el]')
+  if (el) el.textContent = fmtTime((Date.now() - since) / 1000)
+}
+
+function render() {
+  const best = pick()
+  if (!best) {
+    island.className = 'island'
+    curKey = ''
+    curState = ''
+    clearTimeout(shrinkTimer)
+    if (tick) { clearInterval(tick); tick = null }
+    return
+  }
+
+  const key = best.state + '|' + best.id + '|' + best.since
+  if (key !== curKey) {
+    curKey = key
+    curState = best.state
+    since = Number(best.since) || Date.now()
+    const extra = items.length - 1
+    const badge = extra > 0 ? '<span class="badge">×' + extra + '</span>' : ''
+    const meta = best.state === 'thinking' ? '<span class="meta" data-el>' + fmtTime((Date.now() - since) / 1000) + '</span>'
+      : best.state === 'done' ? '<span class="meta">刚刚</span>' : ''
+    const title = String((best.state === 'failed' && best.detail) ? best.detail : (best.title || ''))
+    island.className = 'island ' + best.state + (best.state === 'failed' ? ' shake' : '')
+    bodyEl.innerHTML = (ICON[best.state] || '') +
+      '<span class="txt"><span class="label">' + (LABEL[best.state] || '') + '</span>' + meta +
+      (title ? '<span class="title">' + esc(title) + '</span>' : '') + '</span>' + badge
+    requestAnimationFrame(() => { fit(); island.classList.add('on') })
+    scheduleMini(hovered ? 0 : HOLD_MS[best.state])
+  }
+
+  if (best.state === 'thinking') {
+    if (!tick) { paintTimer(); tick = setInterval(paintTimer, 1000) }
+  } else if (tick) { clearInterval(tick); tick = null }
+}
+
+island.addEventListener('mouseenter', () => {
+  hovered = true
+  window.islandApi.hover(true)
+  expand()
+})
+island.addEventListener('mouseleave', () => {
+  if (drag) return
+  hovered = false
+  window.islandApi.hover(false)
+  scheduleMini(HOLD_MS[curState] || 0)
+})
+
+// 拖动：窗口由主进程跟着光标走，这里只负责起停和区分「点一下」和「拖一下」
+let drag = null
+function endDrag(click) {
+  if (!drag) return
+  drag = null
+  window.islandApi.dragEnd()
+  if (click) window.islandApi.activate()
+}
+island.addEventListener('mousedown', (e) => {
+  if (e.button !== 0) return
+  drag = { moved: false, sx: e.screenX, sy: e.screenY }
+  window.islandApi.dragStart()
+  e.preventDefault()
+})
+window.addEventListener('mousemove', (e) => {
+  if (!drag) return
+  if (e.buttons === 0) return endDrag(false) // 松手时窗口已经跟着光标跑，mouseup 可能收不到
+  if (Math.abs(e.screenX - drag.sx) + Math.abs(e.screenY - drag.sy) > 3) drag.moved = true
+})
+window.addEventListener('mouseup', () => endDrag(drag && !drag.moved))
+
+window.islandApi.onState((next) => { items = Array.isArray(next) ? next : []; render() })
+</script>
+</body>
+</html>

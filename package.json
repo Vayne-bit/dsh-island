@@ -1,0 +1,13 @@
+{
+  "name": "dsh-island",
+  "version": "0.1.1",
+  "private": true,
+  "type": "module",
+  "main": "lib/index.js",
+  "description": "灵动岛状态指示器：宿主跟踪会话的思考/审批/完成/失败状态，置顶浮层以顶部胶囊呈现",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

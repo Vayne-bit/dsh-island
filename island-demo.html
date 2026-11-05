@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>DSH 灵动岛 · 视觉稿</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    background:#07080b;color:#fff;overflow:hidden;
+    font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  /* ── 假桌面背景 ──────────────────────────────────────────────── */
+  .wall{
+    position:fixed;inset:0;
+    background:
+      radial-gradient(900px 520px at 16% 6%, #1b2b4a 0%, transparent 62%),
+      radial-gradient(820px 620px at 84% 14%, #3a1f3f 0%, transparent 64%),
+      radial-gradient(760px 700px at 50% 112%, #0f2a2c 0%, transparent 66%),
+      linear-gradient(#0a0c11,#05060a);
+  }
+  .win{
+    position:absolute;left:50%;top:110px;transform:translateX(-50%);
+    width:min(1080px,86vw);height:min(560px,58vh);
+    border-radius:12px;border:1px solid rgba(255,255,255,.07);
+    background:linear-gradient(180deg,rgba(22,24,30,.9),rgba(12,13,18,.92));
+    box-shadow:0 40px 90px rgba(0,0,0,.55);overflow:hidden;
+  }
+  .win-bar{height:34px;display:flex;align-items:center;gap:6px;padding:0 12px;border-bottom:1px solid rgba(255,255,255,.06)}
+  .win-bar i{width:9px;height:9px;border-radius:50%;background:rgba(255,255,255,.14)}
+  .win-body{display:flex;height:calc(100% - 34px)}
+  .win-side{width:190px;border-right:1px solid rgba(255,255,255,.05);padding:14px}
+  .win-main{flex:1;padding:18px 22px;display:flex;flex-direction:column;gap:10px}
+  .sk{height:10px;border-radius:5px;background:rgba(255,255,255,.07)}
+  .sk.s1{width:38%} .sk.s2{width:82%} .sk.s3{width:64%} .sk.s4{width:74%}
+  .sk.sm{height:8px;width:56%;background:rgba(255,255,255,.045)}
+
+  /* ── 岛 ──────────────────────────────────────────────────────── */
+  .stage{position:fixed;top:0;left:0;right:0;display:flex;justify-content:center;padding-top:12px;z-index:50}
+
+  .island{
+    --acc:#8a8f9c;
+    position:relative;
+    height:38px;padding:0 14px;max-width:min(460px,80vw);
+    display:flex;align-items:center;justify-content:center;
+    border-radius:19px;
+    background:rgba(11,12,16,.88);
+    backdrop-filter:blur(26px) saturate(170%);
+    -webkit-backdrop-filter:blur(26px) saturate(170%);
+    border:1px solid rgba(255,255,255,.10);
+    box-shadow:0 12px 34px rgba(0,0,0,.48), inset 0 1px 0 rgba(255,255,255,.06);
+    white-space:nowrap;overflow:hidden;
+    transform:translateY(-72px);opacity:0;
+    transition:width .55s cubic-bezier(.32,1.35,.55,1),
+               background .35s ease, border-color .35s ease,
+               box-shadow .45s ease, transform .5s cubic-bezier(.32,1.35,.55,1),
+               opacity .28s ease;
+  }
+  .island.on{transform:translateY(0);opacity:1}
+
+  .body{display:flex;align-items:center;gap:9px;width:100%;justify-content:center;
+    font-size:13px;line-height:1;letter-spacing:.2px;animation:fadeIn .3s ease both}
+  @keyframes fadeIn{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
+
+  .txt{display:flex;align-items:center;gap:7px;min-width:0;flex:0 1 auto;overflow:hidden}
+  .label{font-weight:600;color:#fff;white-space:nowrap}
+  .meta{font-size:12px;color:rgba(255,255,255,.42);font-variant-numeric:tabular-nums;flex:none}
+  .title{
+    min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    font-size:12px;color:rgba(255,255,255,.46);
+    padding-left:7px;border-left:1px solid rgba(255,255,255,.12);
+  }
+  .badge{
+    flex:none;font-size:11px;line-height:1;padding:3px 6px;border-radius:9px;
+    background:rgba(255,255,255,.12);color:rgba(255,255,255,.75);font-variant-numeric:tabular-nums;
+  }
+
+  /* 思考 */
+  .island.thinking{--acc:#6ea8ff;border-color:rgba(110,168,255,.22);
+    box-shadow:0 0 0 1px rgba(110,168,255,.12),0 10px 34px rgba(30,80,190,.42),inset 0 1px 0 rgba(255,255,255,.07)}
+  .spin{width:14px;height:14px;border-radius:50%;border:2px solid rgba(255,255,255,.14);
+    border-top-color:var(--acc);animation:spin .85s linear infinite;flex:none}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  /* 审批 */
+  .island.approval{--acc:#ffb648;border-color:rgba(255,182,72,.3);background:rgba(26,19,8,.9);
+    animation:pulseAmber 1.7s ease-in-out infinite}
+  @keyframes pulseAmber{
+    0%,100%{box-shadow:0 0 0 1px rgba(255,182,72,.14),0 10px 32px rgba(255,150,20,.28),inset 0 1px 0 rgba(255,255,255,.07)}
+    50%    {box-shadow:0 0 0 2px rgba(255,182,72,.30),0 12px 40px rgba(255,150,20,.50),inset 0 1px 0 rgba(255,255,255,.09)}
+  }
+  .ring{position:relative;width:14px;height:14px;flex:none}
+  .ring::before,.ring::after{content:"";position:absolute;inset:0;border-radius:50%}
+  .ring::before{background:var(--acc);opacity:.9}
+  .ring::after{border:2px solid var(--acc);animation:ripple 1.7s ease-out infinite}
+  @keyframes ripple{0%{transform:scale(1);opacity:.7}100%{transform:scale(2.4);opacity:0}}
+
+  /* 完成 */
+  .island.done{--acc:#3ddc84;border-color:rgba(61,220,132,.3);background:rgba(8,24,16,.9);
+    box-shadow:0 0 0 1px rgba(61,220,132,.12),0 10px 34px rgba(20,150,80,.36),inset 0 1px 0 rgba(255,255,255,.07)}
+  .check{width:16px;height:16px;flex:none}
+  .check path{fill:none;stroke:var(--acc);stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round;
+    stroke-dasharray:22;stroke-dashoffset:22;animation:draw .45s .1s ease forwards}
+  @keyframes draw{to{stroke-dashoffset:0}}
+
+  /* 失败 */
+  .island.failed{--acc:#ff5f57;border-color:rgba(255,95,87,.32);background:rgba(28,10,10,.9);
+    box-shadow:0 0 0 1px rgba(255,95,87,.14),0 10px 36px rgba(190,30,30,.42),inset 0 1px 0 rgba(255,255,255,.06)}
+  .island.failed.shake{animation:shake .45s .05s ease both}
+  @keyframes shake{
+    0%,100%{transform:translateX(0)}
+    20%{transform:translateX(-3px)} 40%{transform:translateX(3px)}
+    60%{transform:translateX(-2px)} 80%{transform:translateX(1px)}
+  }
+  .cross{width:15px;height:15px;flex:none}
+  .cross path{fill:none;stroke:var(--acc);stroke-width:2.4;stroke-linecap:round}
+
+  /* 空闲 */
+  .island.idle{width:34px;padding:0;background:rgba(11,12,16,.8)}
+  .dot{width:7px;height:7px;border-radius:50%;background:rgba(255,255,255,.42)}
+
+  /* ── 控制栏 ────────────────────────────────────────────────── */
+  .dock{
+    position:fixed;left:50%;bottom:26px;transform:translateX(-50%);
+    display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:center;
+    padding:10px 12px;border-radius:14px;z-index:60;
+    background:rgba(18,20,26,.82);border:1px solid rgba(255,255,255,.08);
+    backdrop-filter:blur(18px);box-shadow:0 18px 44px rgba(0,0,0,.5);
+  }
+  .dock button{
+    font:inherit;font-size:12px;color:rgba(255,255,255,.82);
+    background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.09);
+    padding:6px 11px;border-radius:8px;cursor:pointer;transition:.18s;
+  }
+  .dock button:hover{background:rgba(255,255,255,.13);color:#fff}
+  .dock button.act{background:rgba(110,168,255,.2);border-color:rgba(110,168,255,.35);color:#cfe1ff}
+  .dock .sep{width:1px;height:18px;background:rgba(255,255,255,.1);margin:0 2px}
+  .hint{position:fixed;left:50%;bottom:80px;transform:translateX(-50%);
+    font-size:11px;color:rgba(255,255,255,.28);z-index:60;letter-spacing:.3px}
+</style>
+</head>
+<body>
+  <div class="wall">
+    <div class="win">
+      <div class="win-bar"><i></i><i></i><i></i></div>
+      <div class="win-body">
+        <div class="win-side">
+          <div class="sk sm" style="margin-bottom:14px"></div>
+          <div class="sk sm" style="margin-bottom:10px;width:72%"></div>
+          <div class="sk sm" style="margin-bottom:10px;width:48%"></div>
+          <div class="sk sm" style="width:60%"></div>
+        </div>
+        <div class="win-main">
+          <div class="sk s1"></div><div class="sk s2"></div><div class="sk s3"></div>
+          <div class="sk s4"></div>
+          <div class="sk s2" style="margin-top:12px"></div><div class="sk s3"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="stage">
+    <div class="island" id="island"><div class="body" id="body"></div></div>
+  </div>
+
+  <div class="hint">↓ 点按钮切换状态，或开自动演示</div>
+  <div class="dock">
+    <button data-s="thinking">思考</button>
+    <button data-s="approval">审批</button>
+    <button data-s="done">完成</button>
+    <button data-s="failed">失败</button>
+    <button data-s="idle">空闲</button>
+    <span class="sep"></span>
+    <button id="multi">×N 角标</button>
+    <button id="auto">自动演示</button>
+  </div>
+
+<script>
+const island = document.getElementById('island')
+const body   = document.getElementById('body')
+const MAXW   = 460
+const S = { state:'idle', count:0, since:Date.now(), title:'修复登录接口超时' }
+
+const ICON = {
+  thinking: '<span class="spin"></span>',
+  approval: '<span class="ring"></span>',
+  done:     '<svg class="check" viewBox="0 0 20 20"><path d="M4.5 10.5l3.6 3.6L15.8 6.4"/></svg>',
+  failed:   '<svg class="cross" viewBox="0 0 20 20"><path d="M6 6l8 8M14 6l-8 8"/></svg>',
+  idle:     '<span class="dot"></span>'
+}
+const LABEL = { thinking:'正在思考', approval:'需要审批', done:'完成', failed:'失败', idle:'' }
+
+let tick = null, auto = null
+
+// 宽度按内容自适应，再写回 px 让 CSS 能过渡；超 MAXW 时 .title 用省略号收尾
+function fit(){
+  if (S.state === 'idle'){ island.style.width = '34px'; return }
+  island.style.width = 'auto'
+  const w = Math.min(Math.ceil(island.getBoundingClientRect().width), MAXW)
+  island.style.width = w + 'px'
+}
+
+function render(){
+  island.className = 'island on ' + S.state
+  if (S.state === 'failed') requestAnimationFrame(()=> island.classList.add('shake'))
+
+  if (S.state === 'idle'){ body.innerHTML = ICON.idle; island.style.width = '34px'; stopTimer(); return }
+
+  const badge = S.count > 0 ? `<span class="badge">×${S.count}</span>` : ''
+  const meta  = S.state === 'thinking' ? `<span class="meta" id="el">0s</span>`
+              : S.state === 'done'     ? `<span class="meta">刚刚</span>` : ''
+
+  body.innerHTML = ICON[S.state] +
+    `<span class="txt"><span class="label">${LABEL[S.state]}</span>${meta}` +
+    `<span class="title">${S.title}</span></span>` + badge
+
+  fit()
+  if (S.state === 'thinking') startTimer(); else stopTimer()
+}
+
+function startTimer(){
+  stopTimer()
+  const t0 = S.since
+  const paint = () => { const e = document.getElementById('el'); if (e) e.textContent = Math.floor((Date.now()-t0)/1000) + 's' }
+  paint(); tick = setInterval(paint, 1000)
+}
+function stopTimer(){ if (tick) clearInterval(tick); tick = null }
+
+function set(state, title){
+  S.state = state; S.since = Date.now()
+  if (title) S.title = title
+  if (state === 'failed')   S.title = '模型返回 429 超出速率限制'
+  if (state === 'approval') S.title = '执行 pnpm add electron'
+  render()
+  if (state === 'done')   setTimeout(()=>{ if (S.state==='done')   set('idle') }, 3000)
+  if (state === 'failed') setTimeout(()=>{ if (S.state==='failed') set('idle') }, 5000)
+}
+
+document.querySelectorAll('[data-s]').forEach(b => b.onclick = () => { stopAuto(); set(b.dataset.s) })
+
+document.getElementById('multi').onclick = e => {
+  stopAuto()
+  S.count = S.count > 0 ? 0 : 2
+  if (S.state === 'idle') set('thinking'); else render()
+  e.currentTarget.classList.toggle('act', S.count > 0)
+}
+
+function stopAuto(){ if (auto){ clearInterval(auto); auto = null } document.getElementById('auto').classList.remove('act') }
+
+document.getElementById('auto').onclick = e => {
+  if (auto) { stopAuto(); return }
+  e.currentTarget.classList.add('act')
+  S.count = 2
+  const seq = ['thinking','approval','done','idle','failed','idle']
+  let i = 0
+  set(seq[i++])
+  auto = setInterval(()=>{ set(seq[i % seq.length]); i++ }, 2600)
+}
+
+setTimeout(()=>{ S.count = 2; set('thinking') }, 400)
+</script>
+</body>
+</html>
