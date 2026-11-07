@@ -33,19 +33,25 @@ assert(plugin.name === 'dsh-island-overlay', 'plugin name')
 
 fire('turn/start', {})
 assert(read().items[0].state === 'thinking', 'turn/start → thinking')
+const turnSince = read().items[0].since
 
+// since 是回合计时：审批出现、审批结束、等待回答都不能把它重置
 fire('approval/asked', { id: 'a1', toolName: 'shell' })
 assert(read().items[0].state === 'approval', 'approval/asked → approval')
 assert(read().items[0].detail === 'shell', 'approval detail = toolName')
+assert(read().items[0].since === turnSince, '审批出现时 since 不变（计时不归零）')
 
 fire('approval/decided', { id: 'a1', outcome: 'allowed-once' })
 assert(read().items[0].state === 'thinking', 'approval/decided → thinking')
+assert(read().items[0].since === turnSince, '审批结束后 since 仍是回合开始')
 
 fire('tool/call', { name: 'ask_user_question' })
 assert(read().items[0].state === 'ask', 'ask_user_question → ask')
+assert(read().items[0].since === turnSince, '等待回答时 since 不变')
 
 fire('tool/result', {})
 assert(read().items[0].state === 'thinking', 'tool/result → thinking')
+assert(read().items[0].since === turnSince, '回答完 since 仍是回合开始')
 
 fire('turn/end', { reason: { kind: 'error', error: { message: 'rate limited\nmore' } } })
 assert(read().items[0].state === 'failed', 'turn/end error → failed')

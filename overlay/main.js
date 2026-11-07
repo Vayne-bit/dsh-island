@@ -7,6 +7,7 @@ const { execFile, spawn } = require('child_process')
 const DSH_HOME = process.env.DSH_HOME || path.join(os.homedir(), '.dsh')
 const STATE_FILE = path.join(DSH_HOME, 'dsh-island-state.json')
 const POS_FILE = path.join(DSH_HOME, 'dsh-island-pos.json')
+const CONFIG_FILE = path.join(DSH_HOME, 'dsh-island-config.json')
 const DEAD_MS = 30000
 const LOG_FILE = path.join(DSH_HOME, 'dsh-island-overlay.log')
 
@@ -54,6 +55,20 @@ function savePos() {
   try {
     const [x, y] = win.getPosition()
     fs.writeFileSync(POS_FILE, JSON.stringify({ x, y }), 'utf8')
+  } catch (err) {}
+}
+
+// 拖动 = 切到「自定义位置」。宿主 watchFile 监听同一个配置文件，会立刻把新
+// 配置下发回来（不需要浮层自己刷新界面）。写失败就算了，位置至少本次有效。
+function persistPositionCustom() {
+  try {
+    let cur = {}
+    try { cur = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')) || {} } catch (err) {}
+    if (cur.position === 'custom') return
+    cur.position = 'custom'
+    const tmp = CONFIG_FILE + '.tmp'
+    fs.writeFileSync(tmp, JSON.stringify(cur, null, 2), 'utf8')
+    fs.renameSync(tmp, CONFIG_FILE)
   } catch (err) {}
 }
 
@@ -113,15 +128,27 @@ function create() {
   win.setIgnoreMouseEvents(true, { forward: true })
   win.loadFile(path.join(__dirname, 'index.html'))
   win.once('ready-to-show', () => win.showInactive())
+  // 首帧会丢：tick() 在页面还没加载完时就把状态 send 出去了（被丢弃），
+  // 而 last 已经记下，之后状态不再变化就一直不重发 —— 结果是浮层起来了却空白。
+  // 页面加载完清掉 last，让下一次 tick 无条件重发。
+  win.webContents.on('did-finish-load', () => { last = '' })
 
   // 诊断：之前浮层会莫名其妙消失且日志里什么都没留下，这里把每种死法都记下来
-  win.webContents.on('render-process-gone', (_e, d) => log('render-process-gone: ' + JSON.stringify(d)))
+  let reloads = 0
+  win.webContents.on('render-process-gone', (_e, d) => {
+    log('render-process-gone: ' + JSON.stringify(d))
+    // 渲染进程挂了窗口会留在那但永远空白。重载一次；连续崩就退出，
+    // 让插件的 3 秒心跳重新拉起一个干净进程，而不是卡在空白窗口上。
+    if (reloads++ < 2) setTimeout(() => { try { win.reload() } catch (err) {} }, 1000)
+    else { log('quit: renderer keeps dying'); app.quit() }
+  })
   win.webContents.on('unresponsive', () => log('unresponsive'))
   win.webContents.on('responsive', () => log('responsive'))
   app.on('child-process-gone', (_e, d) => log('child-process-gone: ' + JSON.stringify(d)))
   win.on('hide', () => log('window hidden'))
   win.on('show', () => log('window shown'))
-  win.on('closed', () => log('window closed'))
+  // 窗口被关掉但进程还在 = 不会再有任何界面；直接退出让宿主重新拉起
+  win.on('closed', () => { log('window closed'); app.quit() })
 
   // 别的置顶窗口偶尔会把我们压下去，定期重新抬一次
   setInterval(() => {
@@ -276,6 +303,9 @@ ipcMain.on('drag-end', () => {
   if (!dragOrigin) return
   dragOrigin = null
   savePos()
+  // 只写 pos.json 没用：place() 只在 position==='custom' 时才读它，
+  // 所以拖完重启又回到顶部居中。这里把配置切成 custom（宿主 watchFile 会接住）。
+  persistPositionCustom()
 })
 
 app.whenReady().then(() => {

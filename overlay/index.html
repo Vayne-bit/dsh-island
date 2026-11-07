@@ -150,7 +150,12 @@ function esc(s) {
 
 function fmtTime(sec) {
   sec = Math.max(0, Math.floor(sec))
-  return sec < 60 ? sec + 's' : Math.floor(sec / 60) + 'm' + (sec % 60) + 's'
+  if (sec < 60) return sec + 's'
+  const m = Math.floor(sec / 60)
+  const s = sec % 60
+  if (m < 60) return s ? m + 'm' + s + 's' : m + 'm'
+  const h = Math.floor(m / 60)
+  return m % 60 ? h + 'h' + (m % 60) + 'm' : h + 'h'
 }
 
 function icon(state) {
@@ -202,8 +207,11 @@ function ordered() {
     .sort((a, b) => (RANK[b.state] || 0) - (RANK[a.state] || 0) || (a.since || 0) - (b.since || 0))
 }
 
+const TIMED = { thinking: 1, approval: 1, ask: 1 }
+
 function segHtml(it, primary) {
-  const meta = it.state === 'thinking'
+  // 计时都读 since（= 回合开始），所以「思考 → 审批 → 继续思考」是一条连续的时间轴
+  const meta = TIMED[it.state]
     ? '<span class="meta" data-since="' + (Number(it.since) || Date.now()) + '">' + fmtTime((Date.now() - (Number(it.since) || Date.now())) / 1000) + '</span>'
     : it.state === 'done' ? '<span class="meta">刚刚</span>' : ''
   // 只有主段展开标题，其余段只留图标 + 状态词，避免胶囊被撑爆
@@ -228,6 +236,9 @@ function render() {
     curState = ''
     clearTimeout(shrinkTimer)
     if (tick) { clearInterval(tick); tick = null }
+    // 悬停中被清空时必须把鼠标穿透还回去：窗口本身还在，ignoreMouseEvents=false
+    // 会让它在「看不见」的状态下继续吃掉顶部中间那块区域的点击。
+    if (hovered) { hovered = false; window.islandApi.hover(false) }
     return
   }
 
@@ -235,8 +246,9 @@ function render() {
   const e = cfg.effects || DEFAULTS.effects
   const shown = list.slice(0, MAXSEG)
   const rest = list.length - shown.length
-  // cfg 也进 key：设置页改了缩放/迷你尺寸/动效开关时，items 没变也得重画
-  const key = list.map(it => it.state + it.id + it.since).join(',') + '|' + rest + '|' + JSON.stringify(cfg)
+  // cfg 也进 key：设置页改了缩放/迷你尺寸/动效开关时，items 没变也得重画。
+  // title/detail 同样要进：会话改名、失败原因变化时 since 不变，漏了就不会重绘。
+  const key = list.map(it => it.state + it.id + it.since + '|' + (it.title || '') + '|' + (it.detail || '')).join(',') + '|' + rest + '|' + JSON.stringify(cfg)
   if (key !== curKey) {
     curKey = key
     curState = best.state
@@ -255,9 +267,9 @@ function render() {
     scheduleMini(hovered ? 0 : holdFor(best.state))
   }
 
-  // 只要有思考中的段就跑秒表
-  const anyThinking = list.some(it => it.state === 'thinking')
-  if (anyThinking) {
+  // 只要有一段带计时（思考/审批/等待回答）就跑秒表
+  const anyTimed = list.some(it => TIMED[it.state])
+  if (anyTimed) {
     if (!tick) { paintTimer(); tick = setInterval(paintTimer, 1000) }
   } else if (tick) { clearInterval(tick); tick = null }
 }

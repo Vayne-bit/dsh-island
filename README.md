@@ -83,15 +83,16 @@ dsh plugin --profile desktop add dsh-island-overlay
 | 事件 | 显示 |
 |---|---|
 | `turn/start` | 思考（小鲸鱼 + 计时，2.5s 后缩成小图标） |
-| `approval/asked` | 等待审批（琥珀脉冲，常驻展开） |
+| `approval/asked` | 等待审批（琥珀脉冲，常驻展开，计时接着走） |
 | `tool/call` = `ask_user_question` | 等待回答（同上） |
 | `turn/end` = `completed` | 完成（绿勾，3s 后消失） |
 | `turn/end` = `error` / `blocked` / `max-tokens` | 失败（红色抖动，6s 后消失） |
 | `turn/end` = `aborted` / `interrupted` / `forked` | 不显示，直接消失 |
 
 多个会话同时有事时只显示优先级最高的一个（审批/回答 > 失败 > 完成 > 思考），其余用 `+N` 角标；最多并列显示 3 个会话，每段各自计时。
+计时读的是**回合开始时间**，所以「思考 20 分钟 → 弹审批 → 继续思考」是一条连续的时间轴，不会归零。
 
-交互：拖动可移动位置（记在 `~/.dsh/dsh-island-pos.json`）；点一下把 DSH 拉到前台；
+交互：拖动可移动位置（自动切到「自定义位置」，记在 `~/.dsh/dsh-island-pos.json`）；点一下把 DSH 拉到前台；
 鼠标划过展开全文；检测到前台是全屏程序（视频/游戏）时自动隐藏。
 
 ## 卸载
