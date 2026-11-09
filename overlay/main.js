@@ -8,6 +8,8 @@ const DSH_HOME = process.env.DSH_HOME || path.join(os.homedir(), '.dsh')
 const STATE_FILE = path.join(DSH_HOME, 'dsh-island-state.json')
 const POS_FILE = path.join(DSH_HOME, 'dsh-island-pos.json')
 const CONFIG_FILE = path.join(DSH_HOME, 'dsh-island-config.json')
+const ANSWERS_FILE = path.join(DSH_HOME, 'dsh-island-answers.json')
+const FOREGROUND_FILE = path.join(DSH_HOME, 'dsh-island-foreground.json')
 const DEAD_MS = 30000
 const LOG_FILE = path.join(DSH_HOME, 'dsh-island-overlay.log')
 
@@ -23,9 +25,9 @@ app.disableHardwareAcceleration() // 透明窗口在部分显卡驱动上会闪
 if (!app.requestSingleInstanceLock()) app.exit(0)
 
 const BASE_W = 480
-const BASE_H = 88
 const DEFAULTS = {
   scale: 1, mini: 34, position: 'top-center', showWhen: 'always',
+  layout: 'single', maxRows: 5,
   holdMs: { thinking: 2500, done: 3000, failed: 6000 },
   effects: { whale: true, pulse: true, shake: true, reduce: false },
   states: { thinking: true, approval: true, done: true, failed: true },
@@ -35,11 +37,15 @@ const DEFAULTS = {
 let win = null
 let last = ''
 let cfg = null
+let rowCount = 1 // 当前渲染的可见行数（多行模式由渲染进程上报），驱动窗口高度
+let bubblePx = 0 // 气泡额外高度（未缩放 px，渲染进程上报），驱动窗口高度
 let dragOrigin = null
 let dragTimer = null
 let watchProc = null
 let hiddenByFs = false
 let dshForeground = false
+let hoverActive = false
+let bubbleInteractive = false
 
 const cfgOf = (st) => (st && st.cfg) || DEFAULTS
 
@@ -72,14 +78,23 @@ function persistPositionCustom() {
   } catch (err) {}
 }
 
-// 窗口比胶囊大一圈：缩放后的胶囊要放得下，还要留出呼吸/涟漪的溢出空间
-function winSize(s) {
-  return { w: Math.round(BASE_W * s), h: Math.round(BASE_H * s) }
+// 窗口比胶囊大一圈：缩放后的胶囊要放得下，还要留出呼吸/涟漪的溢出空间。
+// 多行模式下窗口高度随「当前可见行数」动态变化，让每一行都完整放得下、都响应点击。
+const ISLAND_H = 38    // 单行胶囊高度（px，未缩放）
+const ROW_GAP = 6      // 多行模式的行间距（px，未缩放）
+const TOP_PAD = 10     // 顶部留白（px，未缩放）
+const BOT_PAD = 22     // 底部留白，容纳呼吸/涟漪溢出（px，未缩放）
+const BUBBLE_GAP = 8   // 气泡与胶囊之间的间距（px，未缩放）
+function winSize(s, rows) {
+  const r = Math.max(1, Math.floor(rows || 1))
+  let h = TOP_PAD + r * ISLAND_H + (r - 1) * ROW_GAP + BOT_PAD
+  if (bubblePx > 0) h += BUBBLE_GAP + bubblePx // 气泡在胶囊下方，额外占高
+  return { w: Math.round(BASE_W * s), h: Math.round(h * s) }
 }
 
 // 记下的位置可能落在已经拔掉/改分辨率的屏幕上，落在哪块屏就夹到那块屏里
-function place(c) {
-  const { w, h } = winSize(c.scale)
+function place(c, rows) {
+  const { w, h } = winSize(c.scale, rows)
   if (c.position === 'custom') {
     const saved = readPos()
     if (saved) {
@@ -99,8 +114,8 @@ function place(c) {
 
 function create() {
   const c = cfg || DEFAULTS
-  const { w, h } = winSize(c.scale)
-  const pos = place(c)
+  const { w, h } = winSize(c.scale, rowCount)
+  const pos = place(c, rowCount)
   win = new BrowserWindow({
     width: w,
     height: h,
@@ -158,19 +173,26 @@ function create() {
   }, 2000)
 }
 
-// 位置/尺寸/显示时机都来自配置，配置变了就地调整，不用重启浮层
+// 位置/尺寸/显示时机都来自配置，配置变了就地调整，不用重启浮层。
+// 多行模式下行数变化也要重排窗口（高度随之变化）。
+function relayout() {
+  if (!win || win.isDestroyed()) return
+  const c = cfg || DEFAULTS
+  const { w, h } = winSize(c.scale, rowCount)
+  const pos = place(c, rowCount)
+  try {
+    win.setSize(w, h)
+    win.setPosition(pos.x, pos.y)
+    if (c.position !== 'custom') savePos()
+  } catch (err) {}
+}
+
 function applyCfg(next) {
   const prev = cfg
   cfg = next
   if (!win || win.isDestroyed()) return
-  if (prev && next.position === prev.position && next.scale === prev.scale) return
-  const { w, h } = winSize(next.scale)
-  const pos = place(next)
-  try {
-    win.setSize(w, h)
-    win.setPosition(pos.x, pos.y)
-    if (next.position !== 'custom') savePos()
-  } catch (err) {}
+  const layoutSame = prev && next.position === prev.position && next.scale === prev.scale
+  if (!layoutSame) relayout()
 }
 
 // 前台窗口铺满整块屏幕（看视频/游戏）时整只隐藏；showWhen=background 时 DSH 在前台也隐藏。
@@ -188,6 +210,8 @@ function watch() {
         if (fg === undefined || full === undefined) continue
         dshForeground = fg
         hiddenByFs = full
+        // 前台状态变化要立刻让宿主知道：前台时审批/提问直接走官方卡片
+        writeForeground(fg)
         decideVisibility()
       }
     })
@@ -260,16 +284,29 @@ function tick() {
 
   const states = c.states || DEFAULTS.states
   const items = (Array.isArray(st.items) ? st.items : []).filter((it) => it && states[it.state] !== false)
-  const body = JSON.stringify([items, c])
+  const pending = Array.isArray(st.pending) ? st.pending : []
+  const fg = dshForeground
+  const body = JSON.stringify([items, pending, fg, c])
   if (body !== last) {
     last = body
-    try { win.webContents.send('state', { items, cfg: c }) } catch (err) {}
+    try { win.webContents.send('state', { items, pending, foreground: fg, cfg: c }) } catch (err) {}
   }
+}
+
+// 鼠标穿透合并：胶囊悬停、或气泡在场（要点按钮）时才接收鼠标；
+// 其余情况点击穿透（只挡视觉）。气泡展示时窗口必须能被点中。
+function applyIgnoreMouse() {
+  try {
+    if (!win || win.isDestroyed()) return
+    const interactive = hoverActive || bubbleInteractive
+    win.setIgnoreMouseEvents(!interactive, { forward: true })
+  } catch (err) {}
 }
 
 ipcMain.on('hover', (_e, on) => {
   if (dragOrigin) return
-  try { win.setIgnoreMouseEvents(!on, { forward: true }) } catch (err) {}
+  hoverActive = !!on
+  applyIgnoreMouse()
 })
 
 ipcMain.on('activate', () => activate())
@@ -307,6 +344,86 @@ ipcMain.on('drag-end', () => {
   // 所以拖完重启又回到顶部居中。这里把配置切成 custom（宿主 watchFile 会接住）。
   persistPositionCustom()
 })
+
+// 渲染进程上报当前可见行数（多行模式）。行数变了窗口高度跟着变；
+// 拖拽期间不重排，避免跟手定位互相打架。
+ipcMain.on('set-rows', (_e, n) => {
+  const next = Math.max(1, Math.floor(Number(n) || 1))
+  if (next === rowCount) return
+  rowCount = next
+  if (dragOrigin) return
+  relayout()
+})
+
+// 气泡高度（未缩放 px）变化 → 窗口自适应（胶囊在顶、气泡在下的总高）。
+// 气泡在场时窗口必须接收鼠标，好点击气泡里的按钮。
+ipcMain.on('set-bubble', (_e, px) => {
+  const next = Math.max(0, Math.floor(Number(px) || 0))
+  bubbleInteractive = next > 0
+  applyIgnoreMouse()
+  if (next === bubblePx) return
+  bubblePx = next
+  if (dragOrigin) return
+  relayout()
+})
+
+// 渲染进程在气泡里点选后，把决定追加到 answers 文件（seq 单调递增，宿主按 seq 去重结算）。
+// seq 用时间戳兜底：宿主会把已消费的条目从文件里删掉，纯「文件里 max+1」会让
+// seq 回退，而宿主拿 seq 当去重水位线，回退会把新决定误判成已处理而丢掉。
+let answerSeq = 0
+function nextSeq(list) {
+  let max = answerSeq
+  for (const x of list) {
+    const n = Number(x && x.seq)
+    if (Number.isFinite(n) && n > max) max = n
+  }
+  const seq = Math.max(Date.now(), max + 1)
+  answerSeq = seq
+  return seq
+}
+
+function writeAnswer(payload) {
+  try {
+    if (!payload || typeof payload.id !== 'string') { log('[answer] DROP bad id'); return }
+    let list = []
+    try {
+      const raw = fs.readFileSync(ANSWERS_FILE, 'utf8').replace(/^\uFEFF/, '')
+      const p = JSON.parse(raw)
+      if (Array.isArray(p)) list = p
+    } catch (err) { list = [] }
+    const seq = nextSeq(list)
+    if (payload.answers !== undefined && !Array.isArray(payload.answers)) {
+      log('[answer] WARN answers not array: ' + typeof payload.answers)
+    }
+    list.push({
+      seq,
+      id: payload.id,
+      action: payload.action,
+      outcome: payload.outcome,
+      answers: payload.answers,
+    })
+    const text = JSON.stringify(list)
+    log('[answer] WRITE id=' + payload.id + ' seq=' + seq +
+      ' answersLen=' + (Array.isArray(payload.answers) ? payload.answers.length : 'n/a') +
+      ' preview=' + text.slice(0, 300))
+    // 原子写：宿主 watchFile 不会读到半截 JSON。
+    // 与宿主各用各的 tmp，避免两个进程抢同一个中转文件。
+    const tmp = ANSWERS_FILE + '.overlay.tmp'
+    fs.writeFileSync(tmp, text, 'utf8')
+    fs.renameSync(tmp, ANSWERS_FILE)
+  } catch (err) { log('[answer] FAIL ' + ((err && err.stack) || err)) }
+}
+ipcMain.on('answer', (_e, payload) => writeAnswer(payload))
+
+// DSH 前台状态变化 → 写 foreground 文件，宿主据此决定“气泡优先 or 官方卡片”。
+let lastFgWrite = null
+function writeForeground(fg) {
+  try {
+    if (fg === lastFgWrite) return
+    lastFgWrite = fg
+    fs.writeFileSync(FOREGROUND_FILE, JSON.stringify(fg), 'utf8')
+  } catch (err) {}
+}
 
 app.whenReady().then(() => {
   log('start v0.2.0')

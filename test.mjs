@@ -1,12 +1,26 @@
-// 自检：跑一遍状态机，断言写出的 JSON 符合预期。
+// 自检：跑一遍状态机 + 审批/提问气泡的完整应答链路，断言写出的 JSON / resolve 值符合预期。
 // node --test 太重，直接 node dsh-island/test.mjs
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import vm from 'node:vm'
+import { createRequire } from 'node:module'
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'island-'))
 process.env.DSH_HOME = tmp
 process.env.DSH_ISLAND_NO_OVERLAY = '1'
+process.env.DSH_ISLAND_BUBBLE_MS = '50' // 让超时路径可在毫秒级被自检覆盖
+
+// 捕获插件注册的 watchFile 回调：测试里直接驱动 ingestAnswers，不必等 1s 轮询
+const watchers = new Map()
+const realWatchFile = fs.watchFile
+const realUnwatchFile = fs.unwatchFile
+fs.watchFile = (file, opts, cb) => {
+  const fn = typeof opts === 'function' ? opts : cb
+  watchers.set(path.basename(String(file)), fn)
+  return {}
+}
+fs.unwatchFile = () => {}
 
 const { default: plugin } = await import('./lib/index.js')
 
@@ -24,10 +38,20 @@ const root = {
 plugin.apply(root)
 
 const stateFile = path.join(tmp, 'dsh-island-state.json')
+const answersFile = path.join(tmp, 'dsh-island-answers.json')
+const pluginLog = path.join(tmp, 'dsh-island-plugin.log')
+const overlayLog = path.join(tmp, 'dsh-island-overlay.log')
 const read = () => JSON.parse(fs.readFileSync(stateFile, 'utf8'))
 const fire = (type, data, id = 's1') =>
   handlers['session/event'].forEach(fn => fn({ id }, { type, data }))
 const assert = (cond, msg) => { if (!cond) { console.error('FAIL:', msg); process.exit(1) } }
+const driveAnswers = () => {
+  const cb = watchers.get('dsh-island-answers.json')
+  assert(cb, 'answers watcher 已注册')
+  cb()
+}
+const logLines = (file, needle) =>
+  (fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '').split(/\r?\n/).filter(l => l.includes(needle))
 
 assert(plugin.name === 'dsh-island-overlay', 'plugin name')
 
@@ -141,6 +165,225 @@ assert(registered[0].name === 'plugins.bundle.config', 'slot 名正确')
 assert(registered[0].key === 'dsh-island-overlay', 'slot key 等于包名（否则详情页不显示）')
 delete globalThis.window
 
+// ── 浮层 main.js：用 stub 的 electron 加载，只取 ipcMain 的 answer 处理器 ──────
+// whenReady 永不 resolve，避免真的建窗口 / 起轮询 / 拉起 watch.ps1。
+const require = createRequire(import.meta.url)
+const Module = require('node:module')
+const ipcHandlers = {}
+const electronStub = {
+  app: {
+    disableHardwareAcceleration() {},
+    requestSingleInstanceLock: () => true,
+    whenReady: () => new Promise(() => {}),
+    on() {}, quit() {}, exit() {},
+  },
+  BrowserWindow: class {},
+  screen: {},
+  ipcMain: { on: (name, fn) => { ipcHandlers[name] = fn } },
+}
+const origLoad = Module._load
+const uncaughtBefore = process.listeners('uncaughtException')
+Module._load = (request, parent, isMain) => request === 'electron' ? electronStub : origLoad(request, parent, isMain)
+require('./overlay/main.js')
+Module._load = origLoad
+// 还原 main.js 注册的 uncaughtException 钩子，避免它吞掉后续自检里的异常
+process.removeAllListeners('uncaughtException')
+for (const fn of uncaughtBefore) process.on('uncaughtException', fn)
+assert(typeof ipcHandlers.answer === 'function', 'main.js 注册了 answer IPC')
+const writeViaOverlay = (payload) => ipcHandlers.answer(null, payload)
+
+// ── Bug 1 + 疑点 3：气泡作答 → overlay 写文件 → 宿主结算 → waterfall 拿到真值 ──
+// DSH 的 dsh-user-questions 定义 answerBatchSchema = { answers: [{ id, selected, custom? }] }，
+// 官方客户端 submitDrafts 也是这个形状；selected 存的是 option.label。格式本身是对的。
+const askQuestion = {
+  id: 'q1', question: '选哪个?', header: '选择',
+  options: [{ label: '选项A' }, { label: '选项B' }], multiSelect: true,
+}
+const askAnswer = [{ id: 'q1', selected: ['选项A'], custom: '补充说明' }]
+let askNextCalls = 0
+const askPromise = handlers['user-questions/request'][0](
+  { agent: { id: 's1' }, questions: [askQuestion], wait: { callId: 'call-1' } },
+  () => { askNextCalls++; return Promise.resolve({ answers: [] }) }
+)
+const askId = read().pending.find(p => p.kind === 'ask').id
+writeViaOverlay({ id: askId, answers: askAnswer })
+driveAnswers()
+const askResult = await askPromise
+assert(askNextCalls === 0, '气泡作答不应委托给官方卡片')
+assert(JSON.stringify(askResult) === JSON.stringify({ answers: askAnswer }), 'ask 拿到完整 answers（格式与 DSH 一致）')
+
+// delegate：next() 返回 Promise，必须 then 化后再 resolve（Bug 1 的 {} 来源）
+let delegateNextCalls = 0
+const delegatePromise = handlers['approval/request'][0](
+  { agent: { id: 's1' }, toolName: 'shell', callId: 'c1', reason: '需要授权' },
+  () => { delegateNextCalls++; return Promise.resolve('allowed-once') }
+)
+const delegateId = read().pending.find(p => p.kind === 'approval').id
+writeViaOverlay({ id: delegateId, action: 'delegate' })
+driveAnswers()
+const delegateResult = await delegatePromise
+assert(delegateNextCalls === 1, 'delegate 调用一次 next()')
+assert(delegateResult === 'allowed-once', 'delegate 拿到 next() 的真实结果（不是 Promise / {}）')
+
+// 超时路径同样走 next() → Promise，也必须拿到真实值
+const timeoutPromise = handlers['approval/request'][0](
+  { agent: { id: 's1' }, toolName: 'shell' },
+  () => Promise.resolve('unavailable')
+)
+await new Promise(r => setTimeout(r, 120))
+const timeoutResult = await timeoutPromise
+assert(timeoutResult === 'unavailable', '超时路径拿到真实 waterfall 结果（不是 {}）')
+
+// seq 去重：同一 seq 二次投递不应再次结算
+const dedupPromise = handlers['approval/request'][0](
+  { agent: { id: 's1' }, toolName: 'shell' }, () => Promise.resolve('ignored')
+)
+const dedupId = read().pending.find(p => p.kind === 'approval').id
+const dedupSeq = Date.now() + 1000
+fs.writeFileSync(answersFile, JSON.stringify([{ seq: dedupSeq, id: dedupId, outcome: 'allowed-once' }]))
+driveAnswers()
+assert(await dedupPromise === 'allowed-once', '去重用例先正常结算一次')
+const before = logLines(pluginLog, 'answer OK ' + dedupId).length
+fs.writeFileSync(answersFile, JSON.stringify([{ seq: dedupSeq, id: dedupId, outcome: 'allowed-once' }]))
+driveAnswers()
+const afterDedup = logLines(pluginLog, 'answer OK ' + dedupId).length
+assert(before === 1 && afterDedup === 1, '同一个 seq 只结算一次（seq 去重生效）')
+
+// ── 排错三行：把真实日志打出来，便于对照线上 ──
+const writeLine = logLines(overlayLog, '[answer] WRITE').filter(l => l.includes(askId)).pop()
+const ingestLine = logLines(pluginLog, 'ingestAnswers').filter(l => l.includes(askId)).pop()
+const okLine = logLines(pluginLog, 'answer OK ' + askId).pop()
+assert(writeLine && ingestLine && okLine, '三条排错日志齐全')
+assert(!okLine.includes('value={}'), 'answer OK 不再是 {}')
+console.log('\n--- 排错三行（自检环境真实产出）---')
+console.log(writeLine.trim())
+console.log(ingestLine.trim())
+console.log(okLine.trim())
+
+// ── Bug 2：renderAskBubble 重渲染后保留已选内容 ──────────────────────────────
+const html = fs.readFileSync(new URL('./overlay/index.html', import.meta.url), 'utf8')
+const script = /<script>([\s\S]*?)<\/script>/.exec(html)[1]
+assert(!/askSel\.set\(q\.id,\s*\[\]\)/.test(script), 'renderAskBubble 不再无条件清空已选')
+assert(script.includes('draft.sel.has(q.id)'), '改为按 pending 隔离的草稿')
+
+const dec = s => String(s).replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+const getAttr = (a, k) => { const m = new RegExp('\\b' + k + '="([^"]*)"').exec(a); return m ? dec(m[1]) : '' }
+const actionBtns = {}
+const actionBtn = sel => {
+  const key = sel.includes('submit') ? 'submit' : 'delegate'
+  return actionBtns[key] ||= { _fn: null, addEventListener(n, f) { this._fn = f }, click() { this._fn && this._fn() } }
+}
+function makeEl() {
+  return {
+    _html: '', className: '',
+    style: { setProperty() {}, width: '' },
+    classList: { add() {}, remove() {}, contains: () => false, toggle() {} },
+    addEventListener() {},
+    querySelectorAll: () => [],
+    getBoundingClientRect: () => ({ x: 0, y: 0, width: 100, height: 40 }),
+    set innerHTML(v) { this._html = v },
+    get innerHTML() { return this._html },
+  }
+}
+function parseButtons(html) {
+  const out = []
+  const re = /<button([^>]*)>/g
+  let m
+  while ((m = re.exec(html))) {
+    const a = m[1]
+    if (!/class="bub-opt/.test(a)) continue
+    out.push({
+      dataset: { qid: getAttr(a, 'data-qid'), multi: getAttr(a, 'data-multi'), label: getAttr(a, 'data-label') },
+      _l: {},
+      classList: { toggle() {}, add() {}, remove() {}, contains: () => false },
+      addEventListener(n, f) { this._l[n] = f },
+      click() { this._l.click && this._l.click() },
+    })
+  }
+  return out
+}
+function parseInputs(html) {
+  const out = []
+  const re = /<input([^>]*)>/g
+  let m
+  while ((m = re.exec(html))) {
+    const a = m[1]
+    out.push({
+      dataset: { qid: getAttr(a, 'data-qid') }, value: getAttr(a, 'value'), _l: {},
+      addEventListener(n, f) { this._l[n] = f },
+      input(v) { this.value = v; this._l.input && this._l.input() },
+    })
+  }
+  return out
+}
+const wrapEl = makeEl(), islandEl = makeEl(), bodyEl = makeEl(), bubbleEl = makeEl()
+// 每次设置 innerHTML 时把按钮/输入框固化下来，保证 addEventListener 与后续 click/input 是同一批对象
+Object.defineProperty(bubbleEl, 'innerHTML', {
+  configurable: true,
+  get() { return this._html },
+  set(v) {
+    this._html = v
+    this._buttons = parseButtons(v)
+    this._inputs = parseInputs(v)
+  },
+})
+bubbleEl.querySelectorAll = sel =>
+  sel === '.bub-opt' ? (bubbleEl._buttons || []) : sel === '.bub-custom' ? (bubbleEl._inputs || []) : []
+bubbleEl.querySelector = sel => /data-act/.test(sel) ? actionBtn(sel) : null
+let push = null
+const answersSent = []
+const sandbox = {
+  document: { getElementById: id => ({ wrap: wrapEl, island: islandEl, body: bodyEl, bubble: bubbleEl }[id]) },
+  window: {
+    islandApi: {
+      onState: cb => { push = cb }, setRows() {}, hover() {}, activate() {},
+      dragStart() {}, dragEnd() {}, setBubble() {}, answer: p => answersSent.push(p),
+    },
+    addEventListener() {},
+  },
+  requestAnimationFrame: fn => fn(),
+  setInterval: () => 0, clearInterval: () => {},
+  setTimeout: () => 0, clearTimeout: () => {},
+  console,
+}
+vm.createContext(sandbox)
+vm.runInContext(script, sandbox)
+assert(typeof push === 'function', '渲染脚本注册了 onState')
+
+const askView = {
+  id: 'qtest-1', kind: 'ask', sessionId: 's1',
+  questions: [{ id: 'q1', question: '选哪个?', options: [{ label: '选项A' }, { label: '选项B' }], multiSelect: true }],
+}
+const demoCfg = {
+  scale: 1, mini: 34, position: 'top-center', showWhen: 'always', layout: 'single', maxRows: 5,
+  holdMs: { thinking: 2500, done: 3000, failed: 6000 },
+  effects: { whale: true, pulse: true, shake: true, reduce: false },
+  states: { thinking: true, approval: true, done: true, failed: true },
+  hideFullscreen: true, bubble: { approval: true, ask: true },
+}
+const pushState = fg => push({ items: [], pending: [askView], foreground: fg, cfg: demoCfg })
+
+pushState(false)
+assert(bubbleEl.innerHTML.includes('data-label="选项A"'), '气泡渲染出选项')
+const optA = bubbleEl.querySelectorAll('.bub-opt').find(b => b.dataset.label === '选项A')
+assert(optA, '能找到选项按钮')
+optA.click()
+bubbleEl.querySelectorAll('.bub-custom')[0].input('补充说明')
+
+// 前后台抖动 → 气泡隐藏再重渲染（旧代码在这里把选择清空）
+pushState(true)
+pushState(false)
+assert(bubbleEl.innerHTML.includes('class="bub-opt sel"'), '重渲染后恢复已选态')
+assert(bubbleEl.innerHTML.includes('value="补充说明"'), '重渲染后恢复自定义输入')
+assert(answersSent.length === 0, '重渲染不应误提交')
+
+actionBtns.submit.click()
+assert(answersSent.length === 1, '提交发出一条决定')
+assert(JSON.stringify(answersSent[0].answers) === JSON.stringify([{ id: 'q1', selected: ['选项A'], custom: '补充说明' }]),
+  '提交带完整选择（不是 selected: []）')
+
 cleanup()
+fs.watchFile = realWatchFile
+fs.unwatchFile = realUnwatchFile
 fs.rmSync(tmp, { recursive: true, force: true })
-console.log('OK — 状态机自检通过')
+console.log('\nOK — 状态机 + 气泡应答链路自检通过')

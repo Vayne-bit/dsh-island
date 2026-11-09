@@ -10,8 +10,35 @@
     -webkit-font-smoothing:antialiased;user-select:none;-webkit-app-region:no-drag}
 
   /* 窗口尺寸 = 基准 * scale，内容整体等比缩放，胶囊永远正好铺满 */
-  .wrap{position:fixed;left:0;right:0;top:0;display:flex;justify-content:center;padding-top:10px;
+  .wrap{position:fixed;left:0;right:0;top:0;display:flex;flex-direction:column;align-items:center;padding-top:10px;
     transform:scale(var(--s,1));transform-origin:top center}
+
+  /* 气泡：审批/提问在 DSH 后台时，胶囊下方浮现的决策卡片。前台则隐藏（走官方卡片） */
+  .bubble{width:max-content;max-width:420px;margin-top:8px;padding:12px 14px;border-radius:14px;
+    background:rgba(14,15,20,.94);backdrop-filter:blur(26px) saturate(170%);-webkit-backdrop-filter:blur(26px) saturate(170%);
+    border:1px solid rgba(255,255,255,.12);box-shadow:0 12px 34px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.06);
+    display:flex;flex-direction:column;gap:8px;font-size:13px;line-height:1.4;color:#fff;
+    animation:bubbleIn .25s cubic-bezier(.3,1.2,.45,1) both}
+  @keyframes bubbleIn{from{opacity:0;transform:translateY(-6px) scale(.97)}to{opacity:1;transform:none}}
+  .bubble.hidden{display:none}
+  .bubble-head{font-weight:600;font-size:12px;color:rgba(255,255,255,.55)}
+  .bubble-tool{font-family:Consolas,monospace;color:#6ea8ff;font-size:12px;word-break:break-word}
+  .bubble-reason{color:rgba(255,255,255,.82);word-break:break-word;max-height:120px;overflow:auto}
+  .bubble-actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+  .bub-btn{border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.06);color:#fff;border-radius:9px;
+    padding:6px 12px;font-size:12px;cursor:pointer;line-height:1}
+  .bub-btn:hover{background:rgba(255,255,255,.13)}
+  .bub-btn.pos{background:rgba(61,220,132,.18);border-color:rgba(61,220,132,.45);color:#7ef0b0}
+  .bub-btn.neg{background:rgba(255,95,87,.16);border-color:rgba(255,95,87,.4);color:#ff9b95}
+  .bub-q{display:flex;flex-direction:column;gap:6px}
+  .bub-qtext{font-weight:500;color:rgba(255,255,255,.88)}
+  .bub-opts{display:flex;flex-wrap:wrap;gap:6px}
+  .bub-opt{border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.05);color:#fff;border-radius:900px;
+    padding:5px 10px;font-size:12px;cursor:pointer;line-height:1}
+  .bub-opt.sel{background:rgba(110,168,255,.22);border-color:rgba(110,168,255,.55);color:#bcd7ff}
+  .bub-custom{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);border-radius:9px;
+    color:#fff;padding:6px 9px;font-size:12px;outline:none;width:100%}
+  .bub-custom::placeholder{color:rgba(255,255,255,.35)}
 
   .island{
     --acc:#8a8f9c;--mini:34px;position:relative;height:38px;padding:0 14px;max-width:460px;
@@ -51,6 +78,45 @@
     color:rgba(255,255,255,.46);padding-left:7px;border-left:1px solid rgba(255,255,255,.12)}
   .badge{flex:none;font-size:11px;line-height:1;padding:3px 6px;border-radius:9px;
     background:rgba(255,255,255,.12);color:rgba(255,255,255,.75);font-variant-numeric:tabular-nums}
+
+  /* ── 多行模式（layout=multi）：每个会话一行，纵向堆叠；不缩成迷你点 ── */
+  .island.multi{height:auto;padding:7px;flex-direction:column;justify-content:flex-start;border-radius:16px}
+  .island.multi .body{flex-direction:column;align-items:stretch;gap:4px;width:auto}
+  .island.multi .row{display:flex;align-items:center;gap:7px;height:26px;min-width:0;padding:0 9px;border-radius:9px;
+    background:rgba(255,255,255,.05);white-space:nowrap}
+  .island.multi .row.thinking{--acc:#6ea8ff}
+  .island.multi .row.approval,.island.multi .row.ask{--acc:#ffb648}
+  .island.multi .row.done{--acc:#3ddc84}
+  .island.multi .row.failed{--acc:#ff5f57}
+  .island.multi .row.more{background:transparent;color:rgba(255,255,255,.55)}
+  .island.multi .rowlab{font-weight:600;color:#fff;white-space:nowrap;flex:none}
+  .island.multi .rotti{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;
+    color:rgba(255,255,255,.55);padding-left:7px;border-left:1px solid rgba(255,255,255,.12)}
+  .island.multi .whale{width:16px;height:16px}
+  .island.multi .ring,.island.multi .spin,.island.multi .whale-still{width:13px;height:13px}
+  .island.multi .check,.island.multi .cross{width:14px;height:14px}
+  /* 多行模式不收缩成小圆点，也不做整颗的摇动/弹跳（每行各自颜色已足够区分） */
+  .island.multi.shake,.island.multi .body,.island.multi.done.on{animation:none!important}
+  .island.multi .burst{display:none}
+  /* 多行模式也可以收成迷你球（跟单行一样，收起时间到了就缩成圆点，悬停再展开）。
+     收球时露在圆点里的只有第一行的图标，其余行和文字全部隐藏。 */
+  .island.multi.mini{width:var(--mini);height:var(--mini);flex-direction:row;justify-content:center;align-items:center;padding:0;border-radius:calc(var(--mini)/2)}
+  .island.multi.mini .body{flex-direction:row;justify-content:center;width:auto;gap:0}
+  .island.multi.mini .row{background:transparent;padding:0;height:auto}
+  .island.multi.mini .rowlab,.island.multi.mini .meta,.island.multi.mini .rotti,
+  .island.multi.mini .row.more{display:none}
+
+  /* 多行 + 多任务：收起时只留「一只鲸鱼尾巴 × 数量」，不再把每行的图标全挤进圆点。
+     宽度交给内容，圆点会自动稍微加宽成小胶囊（高度仍是迷你态直径，两端保持半圆）。 */
+  .island.multi .mini-count{display:none}
+  .island.multi.has-count.mini{width:auto;padding:0 7px}
+  .island.multi.has-count.mini .row{display:none}
+  .island.multi.has-count.mini .mini-count{display:flex;align-items:center;justify-content:center;gap:2px}
+  .island.multi.has-count.mini .mini-count .whale{width:14px;height:14px}
+  .island.multi.has-count.mini .mini-count .whale-still,
+  .island.multi.has-count.mini .mini-count .spin{width:12px;height:12px}
+  .island.multi.has-count.mini .mini-num{flex:none;font-size:10px;line-height:1;font-weight:600;
+    color:rgba(255,255,255,.85);font-variant-numeric:tabular-nums;letter-spacing:0}
 
   /* ── 思考：DSH 同款小鲸鱼（APNG 尾巴摆动），不支持动效时退回静态描边鲸鱼 ── */
   .island.thinking{--acc:#6ea8ff;border-color:rgba(110,168,255,.22);
@@ -115,11 +181,15 @@
 </style>
 </head>
 <body>
-  <div class="wrap" id="wrap"><div class="island" id="island"><div class="body" id="body"></div></div></div>
+  <div class="wrap" id="wrap">
+    <div class="island" id="island"><div class="body" id="body"></div></div>
+    <div class="bubble hidden" id="bubble"></div>
+  </div>
 <script>
 const wrap = document.getElementById('wrap')
 const island = document.getElementById('island')
 const bodyEl = document.getElementById('body')
+const bubbleEl = document.getElementById('bubble')
 const MAXW = 460
 const MAXSEG = 3
 const RANK = { approval: 4, ask: 3, failed: 2, done: 1, thinking: 0 }
@@ -131,6 +201,7 @@ const WHALE_STILL = '<svg class="whale-still" viewBox="0 0 16 16" fill="none"><p
 
 const DEFAULTS = {
   scale: 1, mini: 34, position: 'top-center', showWhen: 'always',
+  layout: 'single', maxRows: 5,
   holdMs: { thinking: 2500, done: 3000, failed: 6000 },
   effects: { whale: true, pulse: true, shake: true, reduce: false },
   states: { thinking: true, approval: true, done: true, failed: true },
@@ -143,6 +214,12 @@ let curState = ''
 let hovered = false
 let shrinkTimer = null
 let tick = null
+let lastRows = 1 // 上次上报给主进程的行数（多行模式窗口高度靠它）
+let curRows = 1  // 多行模式下当前内容的实际行数（不含 mini 折叠时的值）
+// 气泡 / 前台：DSH 主窗口是否在前台、当前待处理的审批/提问列表
+let foreground = false
+let pendingList = []
+let bubbleKey = ''
 
 function esc(s) {
   return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
@@ -177,16 +254,47 @@ function holdFor(state) {
 function fit() {
   const mini = (cfg.mini || 34) + 'px'
   island.style.setProperty('--mini', mini)
-  if (island.classList.contains('mini')) { island.style.width = mini; return }
+  if (island.classList.contains('mini')) {
+    // 多任务计数徽标要横向空间：宽度交给内容，圆点自然变成小胶囊；普通迷你球仍是正圆
+    island.style.width = island.classList.contains('has-count') ? 'auto' : mini
+    return
+  }
+  island.style.width = 'auto'
+  const w = Math.min(Math.ceil(island.getBoundingClientRect().width / (cfg.scale || 1)), MAXW)
+  island.style.width = w + 'px'
+}
+
+// 多行模式：按内容宽度自适应胶囊宽度（不缩点），上限 MAXW
+function fitMulti() {
   island.style.width = 'auto'
   const w = Math.min(Math.ceil(island.getBoundingClientRect().width / (cfg.scale || 1)), MAXW)
   island.style.width = w + 'px'
 }
 
 function expand() {
+  // DSH 在前台：气泡与展开都走官方卡片，胶囊保持缩球，不展开
+  if (foreground) return
   clearTimeout(shrinkTimer)
   island.classList.remove('mini')
   fit()
+  // 多行模式从迷你球展开回完整行时，窗口高度要跟着恢复
+  reportRows()
+}
+
+// DSH 在前台时强制胶囊缩成小球；后台时由正常收起逻辑接管。
+function forceMiniIfForeground() {
+  if (!foreground) return
+  clearTimeout(shrinkTimer)
+  island.classList.add('mini')
+  fit()
+}
+
+// 把当前应占用的窗口行数告知主进程（主进程据此调整窗口高度）。
+// 迷你球（不论单行还是多行）一律占 1 行的高度，多行展开时才上报实际行数。
+function reportRows() {
+  const multi = (cfg.layout || 'single') === 'multi'
+  const rows = (multi && !island.classList.contains('mini')) ? curRows : 1
+  if (rows !== lastRows) { lastRows = rows; window.islandApi.setRows(rows) }
 }
 
 function scheduleMini(ms) {
@@ -196,6 +304,8 @@ function scheduleMini(ms) {
     if (hovered) return
     island.classList.add('mini')
     fit()
+    // 多行收球后窗口高度收回单行；单行本来就一直是单行，这里是无害的 no-op
+    reportRows()
   }, ms)
 }
 
@@ -221,6 +331,17 @@ function segHtml(it, primary) {
     (title ? '<span class="title">' + esc(title) + '</span>' : '') + '</div>'
 }
 
+// 多行模式的一行：每个会话独立一行，所有会话都展开标题，各自带计时
+function rowHtml(it) {
+  const meta = TIMED[it.state]
+    ? '<span class="meta" data-since="' + (Number(it.since) || Date.now()) + '">' + fmtTime((Date.now() - (Number(it.since) || Date.now())) / 1000) + '</span>'
+    : it.state === 'done' ? '<span class="meta">刚刚</span>' : ''
+  const title = String((it.state === 'failed' && it.detail) ? it.detail : (it.title || ''))
+  return '<div class="row ' + it.state + '">' + icon(it.state) +
+    '<span class="rowlab">' + (LABEL[it.state] || '') + '</span>' + meta +
+    (title ? '<span class="rotti">' + esc(title) + '</span>' : '') + '</div>'
+}
+
 function paintTimer() {
   for (const el of island.querySelectorAll('[data-since]')) {
     el.textContent = fmtTime((Date.now() - Number(el.getAttribute('data-since'))) / 1000)
@@ -230,22 +351,64 @@ function paintTimer() {
 function render() {
   wrap.style.setProperty('--s', String(cfg.scale || 1))
   const list = ordered()
+  const multi = (cfg.layout || 'single') === 'multi'
+  const e = cfg.effects || DEFAULTS.effects
   if (!list.length) {
     island.className = 'island'
     curKey = ''
     curState = ''
     clearTimeout(shrinkTimer)
     if (tick) { clearInterval(tick); tick = null }
+    curRows = 1
+    if (lastRows !== 1) { lastRows = 1; window.islandApi.setRows(1) }
     // 悬停中被清空时必须把鼠标穿透还回去：窗口本身还在，ignoreMouseEvents=false
     // 会让它在「看不见」的状态下继续吃掉顶部中间那块区域的点击。
     if (hovered) { hovered = false; window.islandApi.hover(false) }
     return
   }
 
+  // ── 多行模式：每个会话一行，纵向堆叠，各自展示 ──
+  if (multi) {
+    const maxRows = Math.max(1, cfg.maxRows || 5)
+    const shown = list.slice(0, maxRows)
+    const rest = list.length - shown.length
+    // 多任务收成迷你球时只留「一只鲸鱼尾巴 × 总数」，别把每行图标都挤进圆点
+    const counted = list.length > 1
+    const key = 'M|' + list.map(it => it.state + it.id + it.since + '|' + (it.title || '') + '|' + (it.detail || '')).join(',') +
+      '|' + rest + '|' + JSON.stringify(cfg)
+    if (key !== curKey) {
+      curKey = key
+      curState = shown.length ? shown[0].state : ''
+      let cls = 'island multi'
+      if (counted) cls += ' has-count'
+      if (!e.pulse) cls += ' no-pulse'
+      if (e.reduce) cls += ' reduce'
+      island.className = cls
+      bodyEl.innerHTML = shown.map(rowHtml).join('') +
+        (rest > 0 ? '<div class="row more"><span class="badge">+' + rest + '</span><span class="rowlab">更多</span></div>' : '') +
+        (counted ? '<div class="mini-count">' + icon('thinking') +
+          '<span class="mini-num">×' + list.length + '</span></div>' : '')
+      // 内容或配置变了会重建 className，mini 状态会被冲掉。跟单行一样，
+      // 重建后按收起时间重新排一次（审批/提问没有收起时间，天然不缩球）。
+      requestAnimationFrame(() => { fitMulti(); island.classList.add('on'); scheduleMini(hovered ? 0 : holdFor(curState)) })
+    }
+    // 只要有一行带计时就跑秒表
+    if (list.some(it => TIMED[it.state])) {
+      if (!tick) { paintTimer(); tick = setInterval(paintTimer, 1000) }
+    } else if (tick) { clearInterval(tick); tick = null }
+    // 行数变化 → 通知主进程调整窗口高度（迷你球时是 1 行）
+    curRows = Math.min(list.length, maxRows) || 1
+    reportRows()
+    return
+  }
+
+  // ── 单行模式（原行为）：主会话 + 折叠 +N ──
   const best = list[0]
-  const e = cfg.effects || DEFAULTS.effects
   const shown = list.slice(0, MAXSEG)
   const rest = list.length - shown.length
+  // 从多行切回单行时，把窗口高度收回单行
+  curRows = 1
+  reportRows()
   // cfg 也进 key：设置页改了缩放/迷你尺寸/动效开关时，items 没变也得重画。
   // title/detail 同样要进：会话改名、失败原因变化时 since 不变，漏了就不会重绘。
   const key = list.map(it => it.state + it.id + it.since + '|' + (it.title || '') + '|' + (it.detail || '')).join(',') + '|' + rest + '|' + JSON.stringify(cfg)
@@ -272,6 +435,152 @@ function render() {
   if (anyTimed) {
     if (!tick) { paintTimer(); tick = setInterval(paintTimer, 1000) }
   } else if (tick) { clearInterval(tick); tick = null }
+
+  // DSH 在前台 → 胶囊强制缩成小球（审批/提问全走官方卡片）
+  forceMiniIfForeground()
+}
+
+// ── 气泡（审批/提问）：DSH 后台且有待处理请求时，胶囊下方浮现决策卡片 ──
+// 每个 pending 一份草稿：选项与自定义输入都按 pending.id 隔离。
+// 以前用全局 askSel/askCustom 且在每次 renderAskBubble 里无条件 set(q.id, [])，
+// 于是前后台切换、pending 顺序变化、心跳重连等重渲染都会把用户已选内容清空，
+// 提交时就变成 selected: [] ——「能操作但内容没传过去」。
+const askDrafts = new Map() // pendingId -> { sel: Map<qid, string[]>, custom: Map<qid, string> }
+
+function draftFor(id) {
+  let d = askDrafts.get(id)
+  if (!d) { d = { sel: new Map(), custom: new Map() }; askDrafts.set(id, d) }
+  return d
+}
+
+// 只保留仍在 pendingList 里的草稿，避免随会话无限堆积
+function pruneDrafts() {
+  const live = new Set(pendingList.map(p => p && p.id).filter(Boolean))
+  for (const id of askDrafts.keys()) if (!live.has(id)) askDrafts.delete(id)
+}
+
+let bubbleShown = false
+
+function reportBubbleHeight() {
+  try {
+    const h = Math.ceil(bubbleEl.getBoundingClientRect().height / (cfg.scale || 1))
+    window.islandApi.setBubble(h)
+  } catch (err) {}
+}
+
+function answerPending(id, payload) {
+  try { window.islandApi.answer({ id, ...payload }) } catch (err) {}
+  // 乐观移除本地气泡；宿主稍后也会从状态文件里清掉
+  pendingList = pendingList.filter(p => p && p.id !== id)
+  askDrafts.delete(id)
+  bubbleKey = ''
+  renderBubble()
+}
+
+function renderApprovalBubble(item) {
+  const reason = item.reason || (item.toolName ? '工具请求授权' : '需要授权')
+  bubbleEl.classList.remove('hidden')
+  bubbleEl.innerHTML =
+    '<div class="bubble-head">需要审批</div>' +
+    (item.toolName ? '<div class="bubble-tool">' + esc(item.toolName) + '</div>' : '') +
+    '<div class="bubble-reason">' + esc(reason) + '</div>' +
+    '<div class="bubble-actions">' +
+      '<button type="button" class="bub-btn neg" data-act="reject">拒绝</button>' +
+      '<button type="button" class="bub-btn pos" data-act="allow">允许一次</button>' +
+    '</div>'
+  bubbleEl.onclick = (e) => {
+    const b = e.target && e.target.closest && e.target.closest('[data-act]')
+    if (!b) return
+    answerPending(item.id, b.dataset.act === 'allow' ? { outcome: 'allowed-once' } : { outcome: 'rejected' })
+  }
+}
+
+function renderAskBubble(item) {
+  const qs = Array.isArray(item.questions) ? item.questions : []
+  const draft = draftFor(item.id)
+  bubbleEl.classList.remove('hidden')
+  let html = '<div class="bubble-head">等待你的回答</div>'
+  html += qs.map(q => {
+    const qid = esc(q.id)
+    const opts = (Array.isArray(q.options) ? q.options.map(o => o && o.label) : [])
+      .filter(l => typeof l === 'string')
+    const multi = !!q.multiSelect
+    // 只初始化一次；重渲染时把已选内容回填到 DOM，不覆盖草稿
+    if (!draft.sel.has(q.id)) draft.sel.set(q.id, [])
+    if (!draft.custom.has(q.id)) draft.custom.set(q.id, '')
+    const curSel = draft.sel.get(q.id) || []
+    const curCustom = draft.custom.get(q.id) || ''
+    return '<div class="bub-q">' +
+      '<div class="bub-qtext">' + esc(q.question || q.header || q.id) + '</div>' +
+      (opts.length ? '<div class="bub-opts">' + opts.map(o =>
+        '<button type="button" class="bub-opt' + (curSel.includes(o) ? ' sel' : '') +
+        '" data-qid="' + qid + '" data-multi="' + (multi ? 1 : 0) + '" data-label="' + esc(o) + '">' + esc(o) + '</button>'
+      ).join('') + '</div>' : '') +
+      '<input class="bub-custom" type="text" placeholder="自定义回答（可选）" data-qid="' + qid +
+        '" value="' + esc(curCustom) + '">' +
+    '</div>'
+  }).join('')
+  html += '<div class="bubble-actions">' +
+    '<button type="button" class="bub-btn" data-act="delegate">改用官方卡片</button>' +
+    '<button type="button" class="bub-btn pos" data-act="submit">提交</button>' +
+  '</div>'
+  bubbleEl.innerHTML = html
+  bubbleEl.onclick = null
+
+  bubbleEl.querySelectorAll('.bub-opt').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const qid = btn.dataset.qid
+      const multi = btn.dataset.multi === '1'
+      const label = btn.dataset.label
+      if (multi) {
+        const arr = draft.sel.get(qid) || []
+        const i = arr.indexOf(label)
+        if (i >= 0) arr.splice(i, 1); else arr.push(label)
+        draft.sel.set(qid, arr)
+        btn.classList.toggle('sel', arr.includes(label))
+      } else {
+        draft.sel.set(qid, [label])
+        // 用 dataset 比较而不是拼 CSS 选择器：q.id 里可能带引号/方括号
+        bubbleEl.querySelectorAll('.bub-opt').forEach(x => x.classList.toggle('sel', x.dataset.qid === qid && x === btn))
+      }
+    })
+  })
+  bubbleEl.querySelectorAll('.bub-custom').forEach(inp => {
+    inp.addEventListener('input', () => draft.custom.set(inp.dataset.qid, inp.value))
+  })
+  bubbleEl.querySelector('[data-act="delegate"]').addEventListener('click', () => answerPending(item.id, { action: 'delegate' }))
+  bubbleEl.querySelector('[data-act="submit"]').addEventListener('click', () => {
+    const answers = qs.map(q => ({
+      id: q.id,
+      selected: draft.sel.get(q.id) || [],
+      ...(draft.custom.get(q.id) ? { custom: draft.custom.get(q.id) } : {}),
+    }))
+    answerPending(item.id, { answers })
+  })
+}
+
+function renderBubble() {
+  pruneDrafts()
+  const show = !foreground && pendingList.length > 0
+  if (!show) {
+    if (bubbleShown) {
+      bubbleShown = false
+      bubbleKey = ''
+      // 不清草稿：DSH 前后台抖动让气泡暂时隐藏又回来时，已选内容要还在
+      bubbleEl.classList.add('hidden')
+      bubbleEl.innerHTML = ''
+      window.islandApi.setBubble(0)
+    }
+    return
+  }
+  const item = pendingList[0]
+  if (item && item.id === bubbleKey) { reportBubbleHeight(); return }
+  bubbleKey = item ? item.id : ''
+  bubbleShown = true
+  if (!item) return
+  if (item.kind === 'approval') renderApprovalBubble(item)
+  else renderAskBubble(item)
+  reportBubbleHeight()
 }
 
 island.addEventListener('mouseenter', () => {
@@ -313,9 +622,12 @@ window.islandApi.onState((payload) => {
   if (Array.isArray(payload)) { items = payload } // 兼容旧宿主只推数组
   else if (payload && typeof payload === 'object') {
     items = Array.isArray(payload.items) ? payload.items : []
+    pendingList = Array.isArray(payload.pending) ? payload.pending : []
+    if (typeof payload.foreground === 'boolean') foreground = payload.foreground
     if (payload.cfg) cfg = payload.cfg
   }
   render()
+  renderBubble()
 })
 </script>
 </body>
