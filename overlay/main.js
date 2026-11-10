@@ -20,9 +20,61 @@ process.on('uncaughtException', (e) => log('fatal: ' + ((e && e.stack) || e)))
 
 app.disableHardwareAcceleration() // 透明窗口在部分显卡驱动上会闪
 
-// 开两个 DSH 实例（或多 profile）会各拉起一个浮层，叠在屏幕同一个位置。
-// 只留第一个，后来的直接退出；状态文件是共享的，旧的那个照样能显示新状态。
-if (!app.requestSingleInstanceLock()) app.exit(0)
+// 开两个 DSH 实例（或多 profile）会各拉起一个浮层，叠在屏幕同一个位置，
+// 所以只留一个。但浮层是 detached 进程，DSH 重启不会带走它 —— 升级插件后
+// 老浮层还占着单实例锁，新代码永远起不来，用户看到的就是「设置不生效」。
+//
+// 所以锁不能只按「有没有人在跑」判断，还要按版本：锁文件里记 PID + 版本，
+// 同版本 → 让位退出；不同版本 → 老的是过期代码，杀掉它、由新的接管。
+const VERSION = (() => { try { return require('../package.json').version } catch (err) { return '0.0.0' } })()
+const LOCK_FILE = path.join(DSH_HOME, 'dsh-island-overlay.lock')
+
+function pidAlive(pid) {
+  if (!Number.isFinite(pid) || pid <= 0) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err) {
+    // EPERM = 进程存在但没有权限（Windows 上常见），也算活着
+    return !!(err && err.code === 'EPERM')
+  }
+}
+
+function readLock() {
+  try {
+    const o = JSON.parse(fs.readFileSync(LOCK_FILE, 'utf8'))
+    return (o && Number.isFinite(o.pid)) ? o : null
+  } catch (err) { return null }
+}
+
+// 拿到「可以继续启动」的许可，或者退出。
+function acquireLock() {
+  const cur = readLock()
+  if (cur && cur.pid !== process.pid && pidAlive(cur.pid)) {
+    if (cur.version === VERSION) {
+      log('another v' + VERSION + ' instance (pid ' + cur.pid + ') is serving, exiting')
+      return false
+    }
+    // 版本不同：杀掉过期实例，自己接管
+    log('taking over from v' + cur.version + ' (pid ' + cur.pid + ')')
+    try { execFile('taskkill', ['/PID', String(cur.pid), '/T', '/F'], () => {}) } catch (err) {}
+  }
+  try {
+    fs.mkdirSync(DSH_HOME, { recursive: true })
+    fs.writeFileSync(LOCK_FILE, JSON.stringify({ pid: process.pid, version: VERSION, at: Date.now() }), 'utf8')
+  } catch (err) {}
+  return true
+}
+
+if (!acquireLock()) app.exit(0)
+
+// 退出时清掉锁（只清自己那条，别把接管者的覆盖了）
+function releaseLock() {
+  try {
+    const cur = readLock()
+    if (cur && cur.pid === process.pid) fs.unlinkSync(LOCK_FILE)
+  } catch (err) {}
+}
 
 const BASE_W = 480
 const DEFAULTS = {
@@ -499,9 +551,10 @@ app.whenReady().then(() => {
   setInterval(() => log('alive'), 60000)
 })
 
-process.on('exit', (code) => log('exit code=' + code))
+process.on('exit', (code) => { releaseLock(); log('exit code=' + code) })
 app.on('before-quit', () => {
   log('before-quit')
+  releaseLock()
   try { if (watchProc) watchProc.kill() } catch (err) {}
 })
-app.on('will-quit', () => log('will-quit'))
+app.on('will-quit', () => { releaseLock(); log('will-quit') })
