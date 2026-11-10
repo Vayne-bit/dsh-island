@@ -171,6 +171,13 @@ dsh plugin --profile desktop add dsh-island-overlay
 - 多任务分段展示、点击不再取消最大化、崩溃/卡死诊断日志、插件页设置卡片。
 - 改名为 `dsh-island-overlay`（原 `dsh-island` 在 npm 上已被占用）。
 
+## 贡献者
+
+- [Vayne-bit](https://github.com/Vayne-bit) — 项目发起、浮层渲染、状态机、打包发布
+- [fusheng68](https://github.com/fusheng68) — 审批/提问气泡的应答链路、多行布局
+
+欢迎提 issue 和 PR。开发分支是 `dev`，`main` 只收经过验证的合并。
+
 ## 卸载
 
 ```powershell
