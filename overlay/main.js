@@ -45,7 +45,6 @@ let watchProc = null
 let hiddenByFs = false
 let dshForeground = false
 let hoverActive = false
-let bubbleInteractive = false
 
 const cfgOf = (st) => (st && st.cfg) || DEFAULTS
 
@@ -399,11 +398,9 @@ ipcMain.on('set-rows', (_e, n) => {
 })
 
 // 气泡高度（未缩放 px）变化 → 窗口自适应（胶囊在顶、气泡在下的总高）。
-// 气泡在场时窗口必须接收鼠标，好点击气泡里的按钮。
+// 鼠标命中由 set-hit 上报的矩形决定，这里只管尺寸。
 ipcMain.on('set-bubble', (_e, px) => {
   const next = Math.max(0, Math.floor(Number(px) || 0))
-  bubbleInteractive = next > 0
-  applyIgnoreMouse()
   if (next === bubblePx) return
   bubblePx = next
   if (dragOrigin) return
@@ -476,10 +473,11 @@ function readHostToken() {
   } catch (err) { return '' }
 }
 
-function writeForeground(fg, visible) {
+function writeForeground(fg, visible, force) {
   try {
     const vis = visible !== undefined ? !!visible : !!(win && !win.isDestroyed() && win.isVisible())
-    if (fg === lastFgWrite && vis === lastVisibleWrite) return
+    // force=true 时无视去重：宿主把「多久没上报」当存活信号，必须定期重报
+    if (!force && fg === lastFgWrite && vis === lastVisibleWrite) return
     lastFgWrite = fg
     lastVisibleWrite = vis
     const token = readHostToken()
@@ -493,6 +491,10 @@ app.whenReady().then(() => {
   tick()
   setInterval(tick, 400)
   watch()
+  // 可见性心跳：宿主把「最近 20 秒内有没有上报」当浮层存活信号。
+  // 崩溃/被 kill 后上报会停，宿主就不再拦审批，审批自动回到官方卡片。
+  writeForeground(dshForeground, undefined, true)
+  setInterval(() => writeForeground(dshForeground, undefined, true), 5000)
   // 每 60 秒留一条活口，日志里能看出它到底活到什么时候
   setInterval(() => log('alive'), 60000)
 })

@@ -1,8 +1,42 @@
 # dsh-island-overlay
 
-DSH 的 Windows 顶部「灵动岛」：切换页面后仍然置顶显示当前会话状态（思考 / 审批 / 完成 / 失败）。
+DSH 的 Windows 顶部「灵动岛」：切换页面后仍然置顶显示当前会话状态（思考 / 审批 / 完成 / 失败），
+并且**在胶囊旁直接批准或回答**，不用切回 DSH。
 
 ![正在思考](https://raw.githubusercontent.com/Vayne-bit/dsh-island/main/docs/shots/thinking.png)
+
+## 审批 / 提问气泡
+
+DSH 在后台时，审批与提问不再只弹官方卡片——胶囊下方浮出一张气泡，点一下就作答：
+
+| 审批气泡 | 提问气泡 |
+|---|---|
+| ![审批气泡](https://raw.githubusercontent.com/Vayne-bit/dsh-island/main/docs/shots/bubble-approval.png) | ![提问气泡](https://raw.githubusercontent.com/Vayne-bit/dsh-island/main/docs/shots/bubble-ask.png) |
+
+- 审批：`拒绝` / `允许一次`。
+- 提问：选项按钮（可多选）+ 自定义输入，或点 `改用官方卡片` 把这一条转回 DSH 自己的 UI。
+- **右键气泡**可暂时收起：它不会替你作答，决定权仍在宿主/官方卡片，下一个新请求进来会重新弹出。
+- **DSH 在前台**、或**浮层被隐藏**（全屏应用、心跳过期）时**不拦**审批，直接交给官方卡片。
+  这一点是硬要求：气泡画在看不见的窗口里，用户既看不到气泡、官方卡片也不出现。
+- 设置页可分别关掉「审批气泡」「提问气泡」。
+
+## 多会话
+
+单行模式按优先级折叠，多行模式每个会话一行：
+
+| 单行（折叠 +N） | 多行（每会话一行） |
+|---|---|
+| ![多会话](https://raw.githubusercontent.com/Vayne-bit/dsh-island/main/docs/shots/multi.png) | ![多行](https://raw.githubusercontent.com/Vayne-bit/dsh-island/main/docs/shots/multi-rows.png) |
+
+排序固定为 **审批/回答 > 失败 > 完成 > 思考**，所以被折叠的永远是最低优先级那条——
+审批不会被 `+N` 吃掉。多行模式的行数在设置页可调（1–20，默认 5），超出的折成最后一行的 `+N`，
+**不额外占一行**，窗口高度就是「行数 × 38px + 留白」，小屏可预期。
+
+最占空间的组合（3 行 + 审批气泡，约 420×256）：
+
+![多行加气泡](https://raw.githubusercontent.com/Vayne-bit/dsh-island/main/docs/shots/multi-bubble.png)
+
+## 其他状态
 
 | 需要审批（常驻展开） | 完成（绿色勾） |
 |---|---|
@@ -11,10 +45,6 @@ DSH 的 Windows 顶部「灵动岛」：切换页面后仍然置顶显示当前�
 | 失败（红色抖动） | 平时缩成小圆点 |
 |---|---|
 | ![失败](https://raw.githubusercontent.com/Vayne-bit/dsh-island/main/docs/shots/failed.png) | ![空闲](https://raw.githubusercontent.com/Vayne-bit/dsh-island/main/docs/shots/idle.png) |
-
-多个会话同时有事时只显示优先级最高的一个，其余折成 `+N`：
-
-![多会话](https://raw.githubusercontent.com/Vayne-bit/dsh-island/main/docs/shots/multi.png)
 
 动效（转圈、脉冲、勾线、抖动、宽度过渡）在 `island-demo.html` 里可以直接看，浏览器打开即可。
 
@@ -96,24 +126,50 @@ dsh plugin --profile desktop add dsh-island-overlay
 交互：拖动可移动位置（自动切到「自定义位置」，记在 `~/.dsh/dsh-island-pos.json`）；点一下把 DSH 拉到前台；
 鼠标划过展开全文（DSH 在前台时也能展开）；检测到前台是全屏程序（视频/游戏）时自动隐藏。
 
-## 审批 / 提问气泡
+## 气泡的实现
 
-DSH 在后台时，审批与提问不再只弹官方卡片——胶囊下方会浮出一张气泡，直接点「允许一次 / 拒绝」，
-提问则选选项或填自定义回答，回车即提交。点「改用官方卡片」可让这一条转回 DSH 自己的 UI。
+浮层与宿主之间用两个小文件通信：`~/.dsh/dsh-island-answers.json`（决定）和
+`~/.dsh/dsh-island-foreground.json`（前台 / 可见性 + 握手 token）。
 
-- **DSH 在前台**、或**浮层被隐藏**（全屏应用、心跳过期）时**不拦**审批，直接交给官方卡片。
-  这一点是硬要求：气泡画在看不见的窗口里，用户既看不到气泡、官方卡片也不出现。
-- **右键气泡**可暂时收起。它不会替你作答，决定权仍在宿主/官方卡片；下一个新请求进来会重新弹出。
-- 设置页可分别关掉「审批气泡」「提问气泡」，关掉后一律走官方卡片。
-- 浮层与宿主之间用两个小文件通信：`~/.dsh/dsh-island-answers.json`（决定）和
-  `~/.dsh/dsh-island-foreground.json`（前台/可见性 + 握手 token）。决定必须带回宿主下发的
-  token 才会被接受，避免往文件里写一条就批准。
+- 宿主挂在 DSH 的 `approval/request`、`user-questions/request` **waterfall** 上当应答者。
+- 决定必须带回宿主下发的 token 才会被接受——挡住「随便往文件里写一条就批准」。
+- 浮层每 5 秒重报一次「我可见」；超过 20 秒没报，宿主就当它没了，审批立刻交回官方卡片。
+  没有这条，浮层崩溃后宿主会一直以为它还在屏幕上。
 
-## 多行布局
+## 版本说明
 
-设置页「多会话展示」可切 `单行（折叠 +N）` / `多行（每会话一行）`，并设「最多行数」（1–20，默认 5）。
-超出部分折成最后一行的 `+N`，**不额外占一行**，所以窗口高度就是「行数 × 38px + 留白」，小屏可预期。
-折叠的永远是优先级最低的会话——审批/提问/完成不会被折掉。
+### 0.3.0
+
+**新增**
+
+- 审批 / 提问气泡：DSH 在后台时直接在胶囊下方批准或回答，不用切回 DSH。
+- 多行布局：设置页可切单行 / 多行，行数 1–20 可调；超出的折成最后一行的 `+N`，不额外占行。
+- 设置页新增「审批气泡」「提问气泡」两个开关。
+
+**修复**
+
+- 「完成」卡住不下去：宿主删终态靠 3 秒定时器，而状态文件是「写 tmp → rename 覆盖」；
+  Windows 上 rename 撞到浮层正在读文件会抛 `EPERM`，异常以前被静默吞掉，磁盘上就留着一条
+  永远不走的「完成」。现在 `flush()` 失败会记日志，且每条状态带 `stateAt`，浮层自己按 TTL 兜底丢弃。
+- 全屏时审批假死 30 分钟：浮层被隐藏时仍然拦下审批，气泡画在看不见的窗口里。
+  现在浮层上报可见性（带 20 秒心跳），不可见就立刻交回官方卡片。
+- 审批可被文件投毒：往 `dsh-island-answers.json` 写一条 `allowed-once` 就能批准。
+  现在决定必须带回宿主下发的 token。
+- DSH 在前台时胶囊被锁成不可展开的小圆点。现在悬停仍可展开。
+- 气泡一出现就整窗拦截点击（透明区域也挡）。现在只让「胶囊 + 气泡」两块矩形接收鼠标。
+- 日志刷屏 `overlay exited code=0`：浮层是 detached 进程，DSH 重启不会带走它，新宿主每 3 秒
+  拉起一个 Electron 抢锁失败（实测 3 分钟 53 次）。现在秒退 + code 0 会退避 60 秒。
+
+### 0.2.3
+
+- 计时不再被审批重置（「思考 20 分钟 → 弹审批」从 0 重数）；审批/等待回答也显示计时。
+- 浮层首帧丢失（起来了但空白）；拖动位置重启后丢失。
+- 点击回退路径仍会取消最大化；悬停中状态清空时不恢复鼠标穿透。
+
+### 0.2.0
+
+- 多任务分段展示、点击不再取消最大化、崩溃/卡死诊断日志、插件页设置卡片。
+- 改名为 `dsh-island-overlay`（原 `dsh-island` 在 npm 上已被占用）。
 
 ## 卸载
 

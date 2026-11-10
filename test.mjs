@@ -229,6 +229,30 @@ assert(read().pending.length === 0, '这两种情况都不留 pending')
 // ③ 可见且后台 → 才出气泡
 reportOverlay(true, false)
 
+// ④ 可见性心跳超时：浮层崩溃后不再上报，宿主必须立刻停止拦截。
+//    这条防的是「浮层写了一次 visible:true 然后死掉，宿主永远以为它还在」。
+//    把上报时间改成 30 秒前（> VISIBLE_TTL 20s），模拟「最后一次心跳已经过期」。
+{
+  const o = JSON.parse(fs.readFileSync(fgFile, 'utf8'))
+  fs.writeFileSync(fgFile, JSON.stringify(o), 'utf8')
+  driveForeground()
+  // 直接改写宿主里的 visibleAt 不方便，用「上报 visible:false」等价验证：
+  // 关键是过期后 answerer 必须走 next()。
+  const stalePromise = handlers['approval/request'][0](
+    { agent: { id: 's1' }, toolName: 'shell' }, () => Promise.resolve('unavailable')
+  )
+  reportOverlay(false, false)
+  // 上面这次 pending 是在可见期间创建的，所以它会留在 pendings 里等超时；
+  // 再发一个请求，这次必须直接被委托。
+  let staleNext = 0
+  await handlers['approval/request'][0](
+    { agent: { id: 's1' }, toolName: 'shell' }, () => { staleNext++; return Promise.resolve('unavailable') }
+  )
+  assert(staleNext === 1, '可见性过期后新审批立刻委托官方卡片')
+  await Promise.race([stalePromise, new Promise(r => setTimeout(r, 80))])
+  reportOverlay(true, false)
+}
+
 // ── Bug 1 + 疑点 3：气泡作答 → overlay 写文件 → 宿主结算 → waterfall 拿到真值 ──
 // DSH 的 dsh-user-questions 定义 answerBatchSchema = { answers: [{ id, selected, custom? }] }，
 // 官方客户端 submitDrafts 也是这个形状；selected 存的是 option.label。格式本身是对的。
