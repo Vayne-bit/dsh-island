@@ -11,4 +11,6 @@ contextBridge.exposeInMainWorld('islandApi', {
   answer: (payload) => ipcRenderer.send('answer', payload),
   // 气泡需要更高窗口（气泡内容比胶囊高）→ 通知主进程调整
   setBubble: (px) => ipcRenderer.send('set-bubble', px),
+  // 可点击区域（胶囊/气泡矩形）→ 主进程只在这些矩形里接收鼠标，其余穿透
+  setHit: (rects) => ipcRenderer.send('set-hit', rects),
 })

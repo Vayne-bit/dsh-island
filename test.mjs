@@ -50,6 +50,11 @@ const driveAnswers = () => {
   assert(cb, 'answers watcher 已注册')
   cb()
 }
+const driveForeground = () => {
+  const cb = watchers.get('dsh-island-foreground.json')
+  assert(cb, 'foreground watcher 已注册')
+  cb()
+}
 const logLines = (file, needle) =>
   (fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '').split(/\r?\n/).filter(l => l.includes(needle))
 
@@ -192,6 +197,38 @@ for (const fn of uncaughtBefore) process.on('uncaughtException', fn)
 assert(typeof ipcHandlers.answer === 'function', 'main.js 注册了 answer IPC')
 const writeViaOverlay = (payload) => ipcHandlers.answer(null, payload)
 
+// 浮层必须先上报「我可见 + 带上宿主下发的 token」，宿主才允许拦审批。
+// 默认不可见 → 直接交给官方卡片（全屏应用时不会假死 30 分钟）。
+const fgFile = path.join(tmp, 'dsh-island-foreground.json')
+const readToken = () => JSON.parse(fs.readFileSync(fgFile, 'utf8')).token
+const reportOverlay = (visible, fg) => {
+  const token = readToken()
+  fs.writeFileSync(fgFile, JSON.stringify({ fg: !!fg, visible: !!visible, token }), 'utf8')
+  driveForeground()
+}
+
+// ① 浮层不可见时绝不拦审批（这是「全屏看视频 → 审批卡 30 分钟」那条的回归测试）
+let hiddenNextCalls = 0
+const hiddenResult = await handlers['approval/request'][0](
+  { agent: { id: 's1' }, toolName: 'shell', callId: 'c0' },
+  () => { hiddenNextCalls++; return Promise.resolve('rejected') }
+)
+assert(hiddenNextCalls === 1, '浮层不可见 → 立刻委托官方卡片（不扣住审批）')
+assert(hiddenResult === 'rejected', '不可见时拿到官方结果')
+
+// ② DSH 在前台时同样不拦
+reportOverlay(true, true)
+let fgNextCalls = 0
+await handlers['approval/request'][0](
+  { agent: { id: 's1' }, toolName: 'shell', callId: 'c0b' },
+  () => { fgNextCalls++; return Promise.resolve('rejected') }
+)
+assert(fgNextCalls === 1, 'DSH 前台 → 立刻委托官方卡片')
+assert(read().pending.length === 0, '这两种情况都不留 pending')
+
+// ③ 可见且后台 → 才出气泡
+reportOverlay(true, false)
+
 // ── Bug 1 + 疑点 3：气泡作答 → overlay 写文件 → 宿主结算 → waterfall 拿到真值 ──
 // DSH 的 dsh-user-questions 定义 answerBatchSchema = { answers: [{ id, selected, custom? }] }，
 // 官方客户端 submitDrafts 也是这个形状；selected 存的是 option.label。格式本身是对的。
@@ -239,15 +276,30 @@ const dedupPromise = handlers['approval/request'][0](
   { agent: { id: 's1' }, toolName: 'shell' }, () => Promise.resolve('ignored')
 )
 const dedupId = read().pending.find(p => p.kind === 'approval').id
-const dedupSeq = Date.now() + 1000
-fs.writeFileSync(answersFile, JSON.stringify([{ seq: dedupSeq, id: dedupId, outcome: 'allowed-once' }]))
+writeViaOverlay({ id: dedupId, outcome: 'allowed-once' })
+const dedupEntry = JSON.parse(fs.readFileSync(answersFile, 'utf8')).find(e => e.id === dedupId)
+assert(dedupEntry && dedupEntry.token, '浮层写出的条目带宿主 token')
 driveAnswers()
 assert(await dedupPromise === 'allowed-once', '去重用例先正常结算一次')
 const before = logLines(pluginLog, 'answer OK ' + dedupId).length
-fs.writeFileSync(answersFile, JSON.stringify([{ seq: dedupSeq, id: dedupId, outcome: 'allowed-once' }]))
+// 把同一 seq 的条目重新投一次：宿主必须认出「已处理过」而不是再结算一次
+fs.writeFileSync(answersFile, JSON.stringify([dedupEntry]))
 driveAnswers()
 const afterDedup = logLines(pluginLog, 'answer OK ' + dedupId).length
 assert(before === 1 && afterDedup === 1, '同一个 seq 只结算一次（seq 去重生效）')
+
+// token 校验：没有宿主 token 的条目必须被拒（挡住往文件里塞一条就批准）
+const forgePromise = handlers['approval/request'][0](
+  { agent: { id: 's1' }, toolName: 'shell' }, () => Promise.resolve('unavailable')
+)
+const forgeId = read().pending.find(p => p.kind === 'approval').id
+fs.writeFileSync(answersFile, JSON.stringify([{ seq: Date.now() + 5000, id: forgeId, outcome: 'allowed-once' }]))
+driveAnswers()
+assert(logLines(pluginLog, 'ingestAnswers REJECT bad token id=' + forgeId).length === 1, '缺 token 的条目被拒')
+// 自检里 BUBBLE_MS 被调成 50ms，所以这里等到的可能是超时委托值（'unavailable'）；
+// 关键是它绝不能是伪造条目想要的 'allowed-once'。
+const forged = await Promise.race([forgePromise, new Promise(r => setTimeout(() => r('still-pending'), 60))])
+assert(forged !== 'allowed-once', '伪造条目没有批准（拿到的是超时委托值，不是 allowed-once）')
 
 // ── 排错三行：把真实日志打出来，便于对照线上 ──
 const writeLine = logLines(overlayLog, '[answer] WRITE').filter(l => l.includes(askId)).pop()

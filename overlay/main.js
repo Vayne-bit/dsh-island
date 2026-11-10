@@ -247,6 +247,8 @@ function decideVisibility() {
       || (c.showWhen === 'background' && dshForeground)
     if (wantHide) { if (win.isVisible()) win.hide() }
     else { if (!win.isVisible()) win.showInactive() }
+    // 可见性一变就上报：宿主据此决定「能不能把审批扣在气泡里」
+    writeForeground(dshForeground)
   } catch (err) {}
 }
 
@@ -293,15 +295,56 @@ function tick() {
   }
 }
 
-// 鼠标穿透合并：胶囊悬停、或气泡在场（要点按钮）时才接收鼠标；
-// 其余情况点击穿透（只挡视觉）。气泡展示时窗口必须能被点中。
+// 鼠标命中：只让「胶囊」和「气泡」这两块矩形接收鼠标，窗口其余空白一律穿透。
+// 以前是 hoverActive || bubbleInteractive 直接整体关掉穿透 —— 气泡一出现，
+// 整个窗口矩形（最宽 480 × 高可达 364）都会拦点击，透明区域也挡，很烦人。
+// 现在按光标位置判断是否落在某块矩形里，命中才开、离开就关。
+let hitRects = [] // [{x,y,w,h}] 窗口客户区坐标（CSS px == DIP）
+
+function cursorInHit() {
+  try {
+    if (!hitRects.length) return false
+    const p = screen.getCursorScreenPoint()
+    const [wx, wy] = win.getPosition()
+    const x = p.x - wx
+    const y = p.y - wy
+    for (const r of hitRects) {
+      if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return true
+    }
+    return false
+  } catch (err) { return false }
+}
+
 function applyIgnoreMouse() {
   try {
     if (!win || win.isDestroyed()) return
-    const interactive = hoverActive || bubbleInteractive
+    const interactive = dragOrigin || hoverActive || cursorInHit()
     win.setIgnoreMouseEvents(!interactive, { forward: true })
   } catch (err) {}
 }
+
+// 穿透状态下窗口收不到 mousemove，所以靠这个 16ms 轮询把「光标进入胶囊/气泡」
+// 重新打开命中。只在有命中矩形（即胶囊可见）时跑，没内容就空转一个判断。
+const hitPoll = setInterval(() => {
+  try {
+    if (!win || win.isDestroyed() || dragOrigin) return
+    if (!hitRects.length) return
+    const want = hoverActive || cursorInHit()
+    if (want !== lastInteractive) { lastInteractive = want; applyIgnoreMouse() }
+  } catch (err) {}
+}, 16)
+if (hitPoll.unref) hitPoll.unref()
+let lastInteractive = false
+
+ipcMain.on('set-hit', (_e, rects) => {
+  try {
+    hitRects = Array.isArray(rects)
+      ? rects.filter(r => r && Number.isFinite(r.x) && Number.isFinite(r.y))
+        .map(r => ({ x: Number(r.x), y: Number(r.y), w: Number(r.w) || 0, h: Number(r.h) || 0 }))
+      : []
+    applyIgnoreMouse()
+  } catch (err) {}
+})
 
 ipcMain.on('hover', (_e, on) => {
   if (dragOrigin) return
@@ -401,6 +444,9 @@ function writeAnswer(payload) {
       action: payload.action,
       outcome: payload.outcome,
       answers: payload.answers,
+      // 宿主下发的 token 原样带回；渲染进程不知道也不需要知道它。
+      // 宿主只接受 token 匹配的条目，挡住「随便往文件里写一条就批准」。
+      token: readHostToken(),
     })
     const text = JSON.stringify(list)
     log('[answer] WRITE id=' + payload.id + ' seq=' + seq +
@@ -416,17 +462,33 @@ function writeAnswer(payload) {
 ipcMain.on('answer', (_e, payload) => writeAnswer(payload))
 
 // DSH 前台状态变化 → 写 foreground 文件，宿主据此决定“气泡优先 or 官方卡片”。
+// 同时上报 visible（浮层自己是否真的在屏幕上）：全屏应用/心跳过期时浮层会被
+// hide，此时宿主必须立刻把审批交给官方卡片，否则气泡画在看不见的窗口里，
+// 用户既看不到气泡、官方卡片也不出现，一直卡到 30 分钟超时才失败。
+// 宿主下发的 token 必须原样保留，不能覆盖掉。
 let lastFgWrite = null
-function writeForeground(fg) {
+let lastVisibleWrite = null
+
+function readHostToken() {
   try {
-    if (fg === lastFgWrite) return
+    const o = JSON.parse(fs.readFileSync(FOREGROUND_FILE, 'utf8'))
+    return (o && typeof o === 'object' && typeof o.token === 'string') ? o.token : ''
+  } catch (err) { return '' }
+}
+
+function writeForeground(fg, visible) {
+  try {
+    const vis = visible !== undefined ? !!visible : !!(win && !win.isDestroyed() && win.isVisible())
+    if (fg === lastFgWrite && vis === lastVisibleWrite) return
     lastFgWrite = fg
-    fs.writeFileSync(FOREGROUND_FILE, JSON.stringify(fg), 'utf8')
+    lastVisibleWrite = vis
+    const token = readHostToken()
+    fs.writeFileSync(FOREGROUND_FILE, JSON.stringify({ fg: !!fg, visible: vis, token }), 'utf8')
   } catch (err) {}
 }
 
 app.whenReady().then(() => {
-  log('start v0.2.0')
+  log("start v" + require("../package.json").version)
   create()
   tick()
   setInterval(tick, 400)

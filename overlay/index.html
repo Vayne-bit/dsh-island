@@ -272,8 +272,8 @@ function fitMulti() {
 }
 
 function expand() {
-  // DSH 在前台：气泡与展开都走官方卡片，胶囊保持缩球，不展开
-  if (foreground) return
+  // 悬停一律展开，DSH 在前台也一样：前台时只是「不弹气泡」（审批走官方卡片），
+  // 不代表胶囊本身要锁成不可展开的小圆点 —— 那样用户想看状态都看不到。
   clearTimeout(shrinkTimer)
   island.classList.remove('mini')
   fit()
@@ -281,9 +281,9 @@ function expand() {
   reportRows()
 }
 
-// DSH 在前台时强制胶囊缩成小球；后台时由正常收起逻辑接管。
+// DSH 在前台时把胶囊缩成小球（省地方），但用户悬停时仍可展开（见 expand()）。
 function forceMiniIfForeground() {
-  if (!foreground) return
+  if (!foreground || hovered) return
   clearTimeout(shrinkTimer)
   island.classList.add('mini')
   fit()
@@ -295,6 +295,8 @@ function reportRows() {
   const multi = (cfg.layout || 'single') === 'multi'
   const rows = (multi && !island.classList.contains('mini')) ? curRows : 1
   if (rows !== lastRows) { lastRows = rows; window.islandApi.setRows(rows) }
+  // 行数/迷你态一变，胶囊的矩形就变了，命中区域跟着重报
+  reportHit()
 }
 
 function scheduleMini(ms) {
@@ -317,6 +319,20 @@ function ordered() {
     .sort((a, b) => (RANK[b.state] || 0) - (RANK[a.state] || 0) || (a.since || 0) - (b.since || 0))
 }
 
+// 终态（done/failed）应该自己消失。宿主靠 setTimeout 删 item，但那个定时器
+// 一旦因为写文件失败/进程被挂起而没跑成，磁盘上就会留下一条永远不走的「完成」，
+// 直到下次状态变化才被覆盖 —— 用户报的「完成气泡卡住不下去」。
+// 这里按 stateAt 兜底丢弃：浮层自己算超龄，不依赖宿主那个可能没跑成的定时器。
+const TTL_MS = { done: 3000, failed: 6000 }
+function alive(it) {
+  const ttl = TTL_MS[it && it.state]
+  if (!ttl) return true
+  const at = Number(it.stateAt) || Number(it.since) || 0
+  // stateAt 缺失（旧宿主）时不做判断，避免把正常状态误删
+  if (!at) return true
+  return Date.now() - at <= ttl
+}
+
 const TIMED = { thinking: 1, approval: 1, ask: 1 }
 
 function segHtml(it, primary) {
@@ -331,15 +347,17 @@ function segHtml(it, primary) {
     (title ? '<span class="title">' + esc(title) + '</span>' : '') + '</div>'
 }
 
-// 多行模式的一行：每个会话独立一行，所有会话都展开标题，各自带计时
-function rowHtml(it) {
+// 多行模式的一行：每个会话独立一行，所有会话都展开标题，各自带计时。
+// rest>0 时在这一行行尾挂 +N（超出 maxRows 的会话数），不额外占一行。
+function rowHtml(it, rest) {
   const meta = TIMED[it.state]
     ? '<span class="meta" data-since="' + (Number(it.since) || Date.now()) + '">' + fmtTime((Date.now() - (Number(it.since) || Date.now())) / 1000) + '</span>'
     : it.state === 'done' ? '<span class="meta">刚刚</span>' : ''
   const title = String((it.state === 'failed' && it.detail) ? it.detail : (it.title || ''))
   return '<div class="row ' + it.state + '">' + icon(it.state) +
     '<span class="rowlab">' + (LABEL[it.state] || '') + '</span>' + meta +
-    (title ? '<span class="rotti">' + esc(title) + '</span>' : '') + '</div>'
+    (title ? '<span class="rotti">' + esc(title) + '</span>' : '') +
+    (rest > 0 ? '<span class="badge">+' + rest + '</span>' : '') + '</div>'
 }
 
 function paintTimer() {
@@ -350,7 +368,7 @@ function paintTimer() {
 
 function render() {
   wrap.style.setProperty('--s', String(cfg.scale || 1))
-  const list = ordered()
+  const list = ordered().filter(alive)
   const multi = (cfg.layout || 'single') === 'multi'
   const e = cfg.effects || DEFAULTS.effects
   if (!list.length) {
@@ -384,8 +402,12 @@ function render() {
       if (!e.pulse) cls += ' no-pulse'
       if (e.reduce) cls += ' reduce'
       island.className = cls
-      bodyEl.innerHTML = shown.map(rowHtml).join('') +
-        (rest > 0 ? '<div class="row more"><span class="badge">+' + rest + '</span><span class="rowlab">更多</span></div>' : '') +
+      // 超出 maxRows 的折成 +N 挂在最后一行行尾，不额外占一行：
+      // 这样窗口高度 == 用户设的行数，小屏可预期。list 已按优先级排序，
+      // 所以被折叠的永远是优先级最低的（思考排在审批/完成之后）。
+      bodyEl.innerHTML = shown.map((it, i) =>
+        rowHtml(it, i === shown.length - 1 && rest > 0 ? rest : 0)
+      ).join('') +
         (counted ? '<div class="mini-count">' + icon('thinking') +
           '<span class="mini-num">×' + list.length + '</span></div>' : '')
       // 内容或配置变了会重建 className，mini 状态会被冲掉。跟单行一样，
@@ -396,8 +418,9 @@ function render() {
     if (list.some(it => TIMED[it.state])) {
       if (!tick) { paintTimer(); tick = setInterval(paintTimer, 1000) }
     } else if (tick) { clearInterval(tick); tick = null }
-    // 行数变化 → 通知主进程调整窗口高度（迷你球时是 1 行）
-    curRows = Math.min(list.length, maxRows) || 1
+    // 行数变化 → 通知主进程调整窗口高度（迷你球时是 1 行）。
+    // 注意用 shown.length 而不是 min(list.length, maxRows)：折叠后不再多占一行。
+    curRows = shown.length || 1
     reportRows()
     return
   }
@@ -465,6 +488,22 @@ function reportBubbleHeight() {
   try {
     const h = Math.ceil(bubbleEl.getBoundingClientRect().height / (cfg.scale || 1))
     window.islandApi.setBubble(h)
+    reportHit()
+  } catch (err) {}
+}
+
+// 上报「可点击区域」：胶囊 + 气泡两块矩形（窗口客户区坐标）。
+// 主进程只在这两块里接收鼠标，窗口其余透明区域一律穿透。
+function reportHit() {
+  try {
+    const rects = []
+    const ib = island.getBoundingClientRect()
+    if (ib.width > 0 && ib.height > 0) rects.push({ x: ib.x, y: ib.y, w: ib.width, h: ib.height })
+    if (!bubbleEl.classList.contains('hidden')) {
+      const bb = bubbleEl.getBoundingClientRect()
+      if (bb.width > 0 && bb.height > 0) rects.push({ x: bb.x, y: bb.y, w: bb.width, h: bb.height })
+    }
+    window.islandApi.setHit(rects)
   } catch (err) {}
 }
 
@@ -559,21 +598,31 @@ function renderAskBubble(item) {
   })
 }
 
+// 右键气泡 = 暂时收起，不作答。只是把这条 pending 从「要显示」里排除掉：
+// 决定权仍然留在宿主/官方卡片手里，下一个新 pending 进来时会重新弹出来。
+const dismissed = new Set() // pendingId
+
+function hideBubble() {
+  bubbleShown = false
+  bubbleKey = ''
+  bubbleEl.classList.add('hidden')
+  bubbleEl.innerHTML = ''
+  window.islandApi.setBubble(0)
+  reportHit()
+}
+
 function renderBubble() {
   pruneDrafts()
-  const show = !foreground && pendingList.length > 0
+  // 已消失的 pending 从「暂时收起」里清掉，避免集合无限增长
+  const live = new Set(pendingList.map(p => p && p.id).filter(Boolean))
+  for (const id of dismissed) if (!live.has(id)) dismissed.delete(id)
+  const first = pendingList.find(p => p && !dismissed.has(p.id))
+  const show = !foreground && !!first
   if (!show) {
-    if (bubbleShown) {
-      bubbleShown = false
-      bubbleKey = ''
-      // 不清草稿：DSH 前后台抖动让气泡暂时隐藏又回来时，已选内容要还在
-      bubbleEl.classList.add('hidden')
-      bubbleEl.innerHTML = ''
-      window.islandApi.setBubble(0)
-    }
+    if (bubbleShown) hideBubble()
     return
   }
-  const item = pendingList[0]
+  const item = first
   if (item && item.id === bubbleKey) { reportBubbleHeight(); return }
   bubbleKey = item ? item.id : ''
   bubbleShown = true
@@ -582,6 +631,16 @@ function renderBubble() {
   else renderAskBubble(item)
   reportBubbleHeight()
 }
+
+// 右键任何位置都收起气泡（气泡内的右键不要冒泡成「点了按钮」）。
+// 用 contextmenu 而不是 mousedown：Windows 上右键不会误触按钮的 click。
+window.addEventListener('contextmenu', (ev) => {
+  if (!bubbleShown) return
+  const item = pendingList.find(p => p && !dismissed.has(p.id))
+  ev.preventDefault()
+  if (item) dismissed.add(item.id)
+  hideBubble()
+})
 
 island.addEventListener('mouseenter', () => {
   hovered = true
