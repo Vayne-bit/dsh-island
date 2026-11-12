@@ -97,6 +97,9 @@ let watchProc = null
 let hiddenByFs = false
 let dshForeground = false
 let hoverActive = false
+// 窗口是否被临时允许接收键盘焦点（气泡里的自定义输入框要能打字）。
+// 默认 focusable:false：不抢焦点，点胶囊也不会把 DSH 顶下去。
+let keyboardFocus = false
 
 const cfgOf = (st) => (st && st.cfg) || DEFAULTS
 
@@ -211,8 +214,14 @@ function create() {
   win.webContents.on('unresponsive', () => log('unresponsive'))
   win.webContents.on('responsive', () => log('responsive'))
   app.on('child-process-gone', (_e, d) => log('child-process-gone: ' + JSON.stringify(d)))
-  win.on('hide', () => log('window hidden'))
+  win.on('hide', () => { keyboardFocus = false; try { win.setFocusable(false) } catch (err) {} log('window hidden') })
   win.on('show', () => log('window shown'))
+  // 用户点到别处（DSH 或其它应用）就还原成不可聚焦，别让浮层一直抢着键盘
+  win.on('blur', () => {
+    if (!keyboardFocus) return
+    keyboardFocus = false
+    try { win.setFocusable(false) } catch (err) {}
+  })
   // 窗口被关掉但进程还在 = 不会再有任何界面；直接退出让宿主重新拉起
   win.on('closed', () => { log('window closed'); app.quit() })
 
@@ -402,6 +411,25 @@ ipcMain.on('hover', (_e, on) => {
   hoverActive = !!on
   applyIgnoreMouse()
 })
+
+// 键盘焦点开关（渲染进程在点到气泡输入框时调用）。
+// focusable:false 的窗口收不到键盘事件，输入框看起来「点得进去但打不了字」；
+// 这里按需临时打开焦点，失焦/气泡收起再还原，尽量不打断用户当前的应用。
+function setKeyboard(on) {
+  try {
+    if (!win || win.isDestroyed()) return
+    const want = !!on
+    if (want === keyboardFocus) {
+      if (want) { win.focus(); win.webContents.focus() }
+      return
+    }
+    keyboardFocus = want
+    win.setFocusable(want)
+    if (want) { win.focus(); win.webContents.focus() }
+    else win.blur()
+  } catch (err) { log('setKeyboard failed: ' + ((err && err.message) || err)) }
+}
+ipcMain.on('keyboard', (_e, on) => setKeyboard(on))
 
 ipcMain.on('activate', () => activate())
 

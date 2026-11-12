@@ -586,6 +586,10 @@ function renderAskBubble(item) {
   })
   bubbleEl.querySelectorAll('.bub-custom').forEach(inp => {
     inp.addEventListener('input', () => draft.custom.set(inp.dataset.qid, inp.value))
+    // 窗口默认 focusable:false，键盘事件根本进不来 —— 输入框「点得进去、打不了字」。
+    // 点到输入框时请主进程临时打开焦点，失焦/收起气泡时再还回去（见 hideBubble）。
+    inp.addEventListener('mousedown', () => window.islandApi.keyboard(true))
+    inp.addEventListener('focus', () => window.islandApi.keyboard(true))
   })
   bubbleEl.querySelector('[data-act="delegate"]').addEventListener('click', () => answerPending(item.id, { action: 'delegate' }))
   bubbleEl.querySelector('[data-act="submit"]').addEventListener('click', () => {
@@ -608,6 +612,8 @@ function hideBubble() {
   bubbleEl.classList.add('hidden')
   bubbleEl.innerHTML = ''
   window.islandApi.setBubble(0)
+  // 气泡没了就不再需要键盘焦点，别把用户的输入一直扣在浮层上
+  window.islandApi.keyboard(false)
   reportHit()
 }
 
@@ -617,7 +623,12 @@ function renderBubble() {
   const live = new Set(pendingList.map(p => p && p.id).filter(Boolean))
   for (const id of dismissed) if (!live.has(id)) dismissed.delete(id)
   const first = pendingList.find(p => p && !dismissed.has(p.id))
-  const show = !foreground && !!first
+  // 不再看 foreground：前台时气泡要留到「宿主把这条 pending 交给官方卡片」为止。
+  // 以前一进前台就立刻隐藏，而宿主只在请求进来的那一刻判断前台，已经扣在气泡里的
+  // 请求不会转交 —— 结果切回主面板后气泡没了、官方卡片也没有，两边都空。
+  // 现在宿主会在前台化时把这些 pending 委托给官方卡片（答案文件里 pending 随之消失），
+  // 气泡也就自然收起，中间不会出现「两个地方都没有」的空档。
+  const show = !!first
   if (!show) {
     if (bubbleShown) hideBubble()
     return

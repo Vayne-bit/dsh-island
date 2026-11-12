@@ -253,6 +253,29 @@ reportOverlay(true, false)
   reportOverlay(true, false)
 }
 
+// ⑤ DSH 切到前台时必须把扣在气泡里的请求交给官方卡片。
+//    回归：以前只在「请求进来那一刻」判断前台，已扣住的 pending 永远不转交；
+//    浮层进前台又把气泡隐藏，于是切回主面板后气泡没了、卡片也没有，两边都空。
+{
+  reportOverlay(true, false) // 可见 + 后台
+  let cardNext = 0
+  const parked = handlers['approval/request'][0](
+    { agent: { id: 's2' }, toolName: 'shell' },
+    () => { cardNext++; return Promise.resolve('rejected') }
+  )
+  assert(read().pending.some(p => p.sessionId === 's2'), '后台时审批扣在气泡里')
+  assert(cardNext === 0, '后台时不调 next()，气泡优先')
+
+  reportOverlay(true, true) // DSH 切到前台
+  const parkedResult = await Promise.race([parked, new Promise(r => setTimeout(() => r('still-pending'), 120))])
+  assert(cardNext === 1, '前台化 → 把 pending 委托给官方卡片')
+  assert(parkedResult === 'rejected', '拿到官方卡片的真实结果')
+  assert(!read().pending.some(p => p.sessionId === 's2'), 'pending 已移除（气泡随之收起）')
+  const s2 = read().items.find(i => i.id === 's2')
+  assert(s2 && s2.state === 'approval', '转交不等于作答：状态仍是 approval')
+  reportOverlay(true, false) // 复位
+}
+
 // ── Bug 1 + 疑点 3：气泡作答 → overlay 写文件 → 宿主结算 → waterfall 拿到真值 ──
 // DSH 的 dsh-user-questions 定义 answerBatchSchema = { answers: [{ id, selected, custom? }] }，
 // 官方客户端 submitDrafts 也是这个形状；selected 存的是 option.label。格式本身是对的。
@@ -408,12 +431,14 @@ bubbleEl.querySelectorAll = sel =>
 bubbleEl.querySelector = sel => /data-act/.test(sel) ? actionBtn(sel) : null
 let push = null
 const answersSent = []
+const keyboardCalls = []
 const sandbox = {
   document: { getElementById: id => ({ wrap: wrapEl, island: islandEl, body: bodyEl, bubble: bubbleEl }[id]) },
   window: {
     islandApi: {
       onState: cb => { push = cb }, setRows() {}, hover() {}, activate() {},
       dragStart() {}, dragEnd() {}, setBubble() {}, answer: p => answersSent.push(p),
+      keyboard: on => keyboardCalls.push(!!on),
     },
     addEventListener() {},
   },
@@ -438,6 +463,7 @@ const demoCfg = {
   hideFullscreen: true, bubble: { approval: true, ask: true },
 }
 const pushState = fg => push({ items: [], pending: [askView], foreground: fg, cfg: demoCfg })
+const askView2 = { ...askView, id: 'qtest-2' }
 
 pushState(false)
 assert(bubbleEl.innerHTML.includes('data-label="选项A"'), '气泡渲染出选项')
@@ -446,17 +472,34 @@ assert(optA, '能找到选项按钮')
 optA.click()
 bubbleEl.querySelectorAll('.bub-custom')[0].input('补充说明')
 
-// 前后台抖动 → 气泡隐藏再重渲染（旧代码在这里把选择清空）
+// 前台化不再隐藏气泡（要留到宿主把 pending 转交官方卡片），所以这里用「真的换一条
+// pending 再切回来」强制重渲染 —— 旧代码在这一步会把已选内容清空成 selected: []。
 pushState(true)
 pushState(false)
+push({ items: [], pending: [askView2, askView], foreground: false, cfg: demoCfg })
+push({ items: [], pending: [askView], foreground: false, cfg: demoCfg })
 assert(bubbleEl.innerHTML.includes('class="bub-opt sel"'), '重渲染后恢复已选态')
 assert(bubbleEl.innerHTML.includes('value="补充说明"'), '重渲染后恢复自定义输入')
 assert(answersSent.length === 0, '重渲染不应误提交')
+
 
 actionBtns.submit.click()
 assert(answersSent.length === 1, '提交发出一条决定')
 assert(JSON.stringify(answersSent[0].answers) === JSON.stringify([{ id: 'q1', selected: ['选项A'], custom: '补充说明' }]),
   '提交带完整选择（不是 selected: []）')
+
+// ── 输入框能打字：窗口默认 focusable:false，点输入框必须请主进程临时开焦点 ──
+push({ items: [], pending: [askView2], foreground: false, cfg: demoCfg })
+assert(bubbleEl.innerHTML.includes('bub-q'), '后台 → 气泡渲染')
+bubbleEl._inputs[0]._l.mousedown()
+assert(keyboardCalls.includes(true), '点输入框 → 申请键盘焦点（否则打不了字）')
+
+// ── 前台化：气泡先留着，等宿主把 pending 转交官方卡片；pending 清空才收起 ──
+push({ items: [], pending: [askView2], foreground: true, cfg: demoCfg })
+assert(bubbleEl.innerHTML.includes('bub-q'), '前台 + 仍有 pending → 气泡先留着（避免两边都没弹窗）')
+push({ items: [], pending: [], foreground: true, cfg: demoCfg })
+assert(bubbleEl.innerHTML === '', '宿主转交后（pending 清空）气泡收起')
+assert(keyboardCalls[keyboardCalls.length - 1] === false, '气泡收起 → 归还键盘焦点')
 
 cleanup()
 fs.watchFile = realWatchFile

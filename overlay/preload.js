@@ -13,4 +13,6 @@ contextBridge.exposeInMainWorld('islandApi', {
   setBubble: (px) => ipcRenderer.send('set-bubble', px),
   // 可点击区域（胶囊/气泡矩形）→ 主进程只在这些矩形里接收鼠标，其余穿透
   setHit: (rects) => ipcRenderer.send('set-hit', rects),
+  // 气泡里的输入框要打字：窗口默认不抢焦点，点进输入框时临时允许聚焦
+  keyboard: (on) => ipcRenderer.send('keyboard', !!on),
 })
