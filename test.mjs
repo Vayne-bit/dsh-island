@@ -242,8 +242,9 @@ reportOverlay(true, false)
     { agent: { id: 's1' }, toolName: 'shell' }, () => Promise.resolve('unavailable')
   )
   reportOverlay(false, false)
-  // 上面这次 pending 是在可见期间创建的，所以它会留在 pendings 里等超时；
-  // 再发一个请求，这次必须直接被委托。
+  // 上面这次 pending 是在可见期间创建的；reportOverlay(false,false) 现在会把
+  // 「可见→不可见」时已扣住的请求一并交回官方卡片（见 ⑥）。再发一个请求，
+  // 这次必须直接被委托。
   let staleNext = 0
   await handlers['approval/request'][0](
     { agent: { id: 's1' }, toolName: 'shell' }, () => { staleNext++; return Promise.resolve('unavailable') }
@@ -273,6 +274,28 @@ reportOverlay(true, false)
   assert(!read().pending.some(p => p.sessionId === 's2'), 'pending 已移除（气泡随之收起）')
   const s2 = read().items.find(i => i.id === 's2')
   assert(s2 && s2.state === 'approval', '转交不等于作答：状态仍是 approval')
+  reportOverlay(true, false) // 复位
+}
+
+// ⑥ 浮层由可见变不可见（全屏应用/被 hide）时，扣在气泡里的请求也要交回官方卡片。
+//    回归：0.3.4 只修了「后台→前台」那条，可见性变 false 的同类空档没覆盖。
+{
+  reportOverlay(true, false) // 可见 + 后台
+  let hideNext = 0
+  const parked = handlers['approval/request'][0](
+    { agent: { id: 's3' }, toolName: 'shell' },
+    () => { hideNext++; return Promise.resolve('rejected') }
+  )
+  assert(read().pending.some(p => p.sessionId === 's3'), '可见时审批扣在气泡里')
+  assert(hideNext === 0, '可见时不调 next()，气泡优先')
+
+  reportOverlay(false, false) // 浮层变不可见
+  const parkedResult = await Promise.race([parked, new Promise(r => setTimeout(() => r('still-pending'), 120))])
+  assert(hideNext === 1, '浮层不可见 → 把 pending 委托给官方卡片')
+  assert(parkedResult === 'rejected', '拿到官方卡片的真实结果')
+  assert(!read().pending.some(p => p.sessionId === 's3'), 'pending 已移除')
+  const s3 = read().items.find(i => i.id === 's3')
+  assert(s3 && s3.state === 'approval', '转交不等于作答：状态仍是 approval')
   reportOverlay(true, false) // 复位
 }
 
@@ -308,6 +331,7 @@ driveAnswers()
 const delegateResult = await delegatePromise
 assert(delegateNextCalls === 1, 'delegate 调用一次 next()')
 assert(delegateResult === 'allowed-once', 'delegate 拿到 next() 的真实结果（不是 Promise / {}）')
+assert(read().items.find(i => i.id === 's1').state === 'approval', 'delegate 转官方卡片 → 状态仍是 approval（不是思考中）')
 
 // 超时路径同样走 next() → Promise，也必须拿到真实值
 const timeoutPromise = handlers['approval/request'][0](
@@ -317,6 +341,7 @@ const timeoutPromise = handlers['approval/request'][0](
 await new Promise(r => setTimeout(r, 120))
 const timeoutResult = await timeoutPromise
 assert(timeoutResult === 'unavailable', '超时路径拿到真实 waterfall 结果（不是 {}）')
+assert(read().items.find(i => i.id === 's1').state === 'approval', '超时转官方卡片 → 状态仍是 approval（不是思考中）')
 
 // seq 去重：同一 seq 二次投递不应再次结算
 const dedupPromise = handlers['approval/request'][0](
